@@ -4,26 +4,22 @@ All notable changes to claude-honcho will be documented in this file.
 
 ## [Unreleased]
 
-## [0.2.5] - 2026-06-02
-
 ### Added
 
-- Memory statusLine — surfaces what Honcho memory is doing on the Claude Code statusLine. Hooks write a per-window activity-state file (`~/.honcho/state-<session>.json`) and a host-managed renderer (`plugins/honcho/scripts/honcho-statusline.sh`) draws sync status, a clickable session link, and a live activity glyph (loading/compacting/recalling/querying). Installed and registered by `/honcho:setup`; toggle on/off via the `statusline` config key, settable through `/honcho:config`.
-- First-prompt tool hint — on the first prompt of a session, nudges the harness to actively call the Honcho MCP tools rather than rely only on passive context injection.
 - Per-host `apiKey` field in `hosts.<name>` — takes precedence over root `apiKey`, still overridden by `HONCHO_API_KEY` env var. Lets different integrations authenticate against different Honcho orgs from one config file.
-- `get_config` now warns when `HONCHO_API_KEY` is set and overrides the `apiKey` in `config.json`, so the active key is never ambiguous.
-- Version-update nag: warns on first prompt when the installed plugin is behind the published version (checks for updates at most once a day; silent on failure).
-- `scripts/analyze-usage.py` — analyzes Claude Code Honcho usage from `~/.claude` logs.
 
 ### Changed
 
-- Skip `cd` commands when logging Bash tool calls
+- User prompts are now written to Honcho in real time on `UserPromptSubmit` instead of being queued for `SessionEnd` flush. Mirrors the existing fire-and-forget pattern used by `PostToolUse` and `Stop`.
 
 ### Fixed
 
-- Spinner degrades gracefully without a TTY — Claude Code >=2.1.139 runs hooks without a controlling terminal, so `/dev/tty` fails; probe for a real terminal and fall back to a single clean line when none is available.
-- `sessionStart` hook now runs async (#43).
-- Preserve a host-scoped `apiKey` already on disk when rewriting config — no longer drops `hosts.<host>.apiKey` on save.
+- Directional observation mode now sets the full per-session directionality on both peers: the user self-observes but does not model the AI (`observeMe:true, observeOthers:false`), and the AI observes the user without self-observing its own assistant/tool output (`observeMe:false, observeOthers:true`). Previously only the AI peer's `observeOthers` was set, leaving its `observeMe` at the Honcho default (`true`) so it self-observed.
+- Eliminated a duplication bug where repeated `SessionEnd` failures (12s timeout, double-fire) caused queued prompts to be re-uploaded indefinitely.
+
+### Removed
+
+- The local `~/.honcho/message-queue.jsonl` queue file is no longer used and can be deleted from user machines to reclaim disk. The plugin will not auto-delete it.
 
 ## [0.2.4] - 2026-04-01
 
