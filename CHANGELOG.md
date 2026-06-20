@@ -7,10 +7,13 @@ All notable changes to claude-honcho will be documented in this file.
 ### Added
 
 - Per-host `apiKey` field in `hosts.<name>` — takes precedence over root `apiKey`, still overridden by `HONCHO_API_KEY` env var. Lets different integrations authenticate against different Honcho orgs from one config file.
+- `scripts/analyze-usage.py` — standalone script to analyze Claude Code's Honcho usage from `~/.claude` logs.
+- Failure-driven local outbox: user prompts and assistant responses that fail to upload (host unreachable) are queued to `~/.honcho/outbox.jsonl` and flushed at the next `SessionStart` once the host is back, instead of being dropped. Records preserve their original session, peer, and timestamp; bounded by 5 MB / 1000-record / 7-day caps (drops logged); concurrency-safe via atomic claim-by-rename; decoupled from session teardown. `post-tool-use` observations are intentionally not queued.
 
 ### Changed
 
 - User prompts are now written to Honcho in real time on `UserPromptSubmit` instead of being queued for `SessionEnd` flush. Mirrors the existing fire-and-forget pattern used by `PostToolUse` and `Stop`.
+- `PostToolUse` no longer records bare `cd` commands as Honcho observations, cutting navigation noise from the session stream.
 
 ### Fixed
 
