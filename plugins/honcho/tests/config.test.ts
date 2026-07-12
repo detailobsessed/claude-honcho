@@ -5,7 +5,7 @@
  * time from homedir(). We set HOME once in beforeAll and clear .honcho
  * between tests.
  */
-import { describe, expect, it, beforeAll, beforeEach, afterAll } from "bun:test";
+import { describe, expect, it, beforeAll, beforeEach, afterEach, afterAll } from "bun:test";
 import { clearSharedHonchoDir, SHARED_HONCHO_DIR } from "./setup";
 import { writeHonchoConfig } from "./helpers";
 
@@ -271,5 +271,35 @@ describe("isPluginEnabled", () => {
     const mod = await import("../src/config.js");
     mod.setDetectedHost("claude_code");
     expect(mod.isPluginEnabled()).toBe(false);
+  });
+});
+
+describe("getHonchoClientOptions SDK timeout (issue #25)", () => {
+  // getHonchoClientOptions only reads apiKey + workspace (+ endpoint).
+  const baseConfig = {
+    apiKey: "hch-test",
+    workspace: "test-ws",
+  } as unknown as import("../src/config.js").HonchoCLAUDEConfig;
+
+  afterEach(() => {
+    delete process.env.HONCHO_SDK_TIMEOUT_MS;
+  });
+
+  it("defaults to 8000ms when the env var is unset", async () => {
+    delete process.env.HONCHO_SDK_TIMEOUT_MS;
+    const { getHonchoClientOptions } = await import("../src/config.js");
+    expect(getHonchoClientOptions(baseConfig).timeout).toBe(8000);
+  });
+
+  it("is overridable via HONCHO_SDK_TIMEOUT_MS (breaks high/max reasoning at 8s)", async () => {
+    process.env.HONCHO_SDK_TIMEOUT_MS = "30000";
+    const { getHonchoClientOptions } = await import("../src/config.js");
+    expect(getHonchoClientOptions(baseConfig).timeout).toBe(30000);
+  });
+
+  it("ignores a non-numeric override and keeps the 8000ms default", async () => {
+    process.env.HONCHO_SDK_TIMEOUT_MS = "not-a-number";
+    const { getHonchoClientOptions } = await import("../src/config.js");
+    expect(getHonchoClientOptions(baseConfig).timeout).toBe(8000);
   });
 });
