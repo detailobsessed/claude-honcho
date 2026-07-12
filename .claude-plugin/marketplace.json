@@ -1,11 +1,11 @@
 {
   "name": "honcho",
   "owner": {
-    "name": "Plastic Labs",
-    "email": "hello@plasticlabs.ai"
+    "name": "Ismar",
+    "url": "https://github.com/ichoosetoaccept"
   },
   "metadata": {
-    "description": "Honcho plugins for Claude Code - memory, development tools, and more",
+    "description": "Community-maintained fork of claude-honcho - persistent memory for Claude Code",
     "version": "0.0.1"
   },
   "plugins": [
