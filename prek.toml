@@ -1,0 +1,36 @@
+# Configuration for prek (https://prek.j178.dev), a fast pre-commit alternative.
+# All hooks here are prek's Rust-native builtins: no cloned repos, no runtime
+# to install, they run offline. List them with `prek util list-builtins`.
+#:schema https://www.schemastore.org/prek.json
+
+# Generated lockfile: we never hand-edit it, so keep the fixers off it.
+exclude = 'plugins/honcho/bun\.lock'
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    # Whitespace / newline hygiene
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "mixed-line-ending", args = ["--fix=lf"] },
+    { id = "fix-byte-order-marker" },
+
+    # Git safety
+    { id = "check-merge-conflict" },
+    { id = "check-case-conflict" },
+    { id = "check-illegal-windows-names" },
+    { id = "check-symlinks" },
+    { id = "destroyed-symlinks" },
+    { id = "check-added-large-files", args = ["--maxkb=2048"] },
+
+    # Security: the plugin handles Honcho API keys, so guard against leaks.
+    { id = "detect-private-key" },
+
+    # Executables must declare an interpreter.
+    { id = "check-executables-have-shebangs" },
+
+    # Structured-config validators (tsconfig.json is JSONC, so it's excluded).
+    { id = "check-json", exclude = 'plugins/honcho/tsconfig\.json' },
+    { id = "check-yaml" },
+    { id = "check-toml" },
+]
