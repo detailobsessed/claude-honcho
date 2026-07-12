@@ -125,36 +125,46 @@ export async function handleUserPrompt(): Promise<void> {
   // Best-effort upload. Wrap the entire SDK interaction so a transient
   // rejection during session/peer setup can't abort context retrieval below.
   if (config.saveMessages !== false) {
+    const uploadPromise = (async () => {
+      const [session, userPeer] = await Promise.all([
+        honcho.session(sessionName),
+        honcho.peer(config.peerName),
+      ]);
+      const messages = chunkContent(prompt).map((chunk) =>
+        userPeer.message(chunk, {
+          metadata: {
+            instance_id: instanceId || undefined,
+            session_affinity: sessionName,
+          },
+        })
+      );
+      logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars)`);
+      await session.addMessages(messages);
+    })();
+
     let uploadTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      // Race the whole SDK interaction against a timeout so it can't block
-      // longer than UPLOAD_TIMEOUT_MS. On timeout the race rejects and we fall
-      // through to the outbox below, exactly like a hard failure.
-      await Promise.race([
-        (async () => {
-          const [session, userPeer] = await Promise.all([
-            honcho.session(sessionName),
-            honcho.peer(config.peerName),
-          ]);
-          const messages = chunkContent(prompt).map((chunk) =>
-            userPeer.message(chunk, {
-              metadata: {
-                instance_id: instanceId || undefined,
-                session_affinity: sessionName,
-              },
-            })
-          );
-          logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars)`);
-          await session.addMessages(messages);
-        })(),
-        new Promise<never>((_, reject) => {
-          uploadTimer = setTimeout(() => reject(new Error("upload timeout")), UPLOAD_TIMEOUT_MS);
+      // Bound the wait so a slow host can't blow the hook budget. A timeout is
+      // NOT a failure: the request is still in flight and may land server-side.
+      // Queuing on timeout would replay a duplicate at the next SessionStart, so
+      // we only fall through to the outbox on a hard rejection that beats the
+      // timer — that means the send genuinely didn't happen.
+      const outcome = await Promise.race([
+        uploadPromise.then(() => "sent" as const),
+        new Promise<"timeout">((resolve) => {
+          uploadTimer = setTimeout(() => resolve("timeout"), UPLOAD_TIMEOUT_MS);
         }),
       ]);
+      if (outcome === "timeout") {
+        logHook("user-prompt", "Upload still in flight after 3s — left running to avoid a duplicate");
+        // The send may still reject later; swallow it so it can't surface as an
+        // unhandled rejection now that the race has moved on.
+        uploadPromise.catch(() => {});
+      }
     } catch (e) {
       logHook("user-prompt", `Upload failed: ${e}`);
-      // Host unreachable or too slow — queue the prompt locally instead of
-      // dropping it. Drained at the next SessionStart once the host is back.
+      // Confirmed failure before the timeout — the send didn't land, so queue
+      // the prompt locally. Drained at the next SessionStart once the host is back.
       const queuedAt = new Date().toISOString();
       enqueueOutbox(
         chunkContent(prompt).map((chunk) => ({
