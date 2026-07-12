@@ -5,8 +5,7 @@
     "url": "https://github.com/ichoosetoaccept"
   },
   "metadata": {
-    "description": "Community-maintained fork of claude-honcho - persistent memory for Claude Code",
-    "version": "0.0.1"
+    "description": "Community-maintained fork of claude-honcho - persistent memory for Claude Code"
   },
   "plugins": [
     {
