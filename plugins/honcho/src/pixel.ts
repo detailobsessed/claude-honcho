@@ -4,7 +4,7 @@
  */
 
 import { openSync, writeSync, closeSync } from "fs";
-import { blocks, circles } from "./unicode.js";
+import { blocks } from "./unicode.js";
 
 // ANSI color codes
 const c = {
@@ -38,9 +38,6 @@ const B = {
   lower: blocks.lowerHalf,     // ▄
   lower2_8: blocks.lower2_8,   // ▂
 };
-
-// Circle for eyes
-const eye = circles.filled;    // ●
 
 /**
  * Simple clean Honcho face - solid peach circle with dark eyes
@@ -317,13 +314,13 @@ export function getHonchoLines(): string[] {
 export function previewAll(): void {
   // Switch terminal to UTF-8 mode first, then output
   writeTTY("\n--- Honcho Compact ---\n", true);  // true = send UTF-8 switch sequence
-  renderHonchoCompact().forEach(line => writeTTY(line + "\n"));
+  renderHonchoCompact().forEach(line => { writeTTY(line + "\n"); });
 
   writeTTY("\n--- Honcho Standard ---\n");
-  renderHoncho().forEach(line => writeTTY(line + "\n"));
+  renderHoncho().forEach(line => { writeTTY(line + "\n"); });
 
   writeTTY("\n--- Honcho Gradient ---\n");
-  renderHonchoGradient().forEach(line => writeTTY(line + "\n"));
+  renderHonchoGradient().forEach(line => { writeTTY(line + "\n"); });
 
   writeTTY("\n--- Honcho Startup Display ---\n");
   writeTTY(displayHonchoStartup("Honcho Memory", "persistent context") + "\n");

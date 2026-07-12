@@ -7,9 +7,6 @@ import {
   getConfigPath,
   getConfigDir,
   getHonchoClientOptions,
-  getDetectedHost,
-  getDefaultWorkspace,
-  getDefaultAiPeer,
   configExists,
   setDetectedHost,
   getClaudeSettingsPath,
@@ -151,8 +148,8 @@ async function setup(): Promise<void> {
 
   try {
     const honcho = new Honcho(getHonchoClientOptions(config));
-    const session = await honcho.session("setup-test");
-    const peer = await honcho.peer(config.peerName);
+    await honcho.session("setup-test");
+    await honcho.peer(config.peerName);
     console.log(s.success("Connected to Honcho API"));
     console.log(`  ${s.label("Workspace")}: ${config.workspace}`);
     console.log(`  ${s.label("Peer")}:      ${config.peerName}`);
