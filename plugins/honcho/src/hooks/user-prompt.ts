@@ -48,7 +48,7 @@ function extractTopics(prompt: string): string[] {
   const topics: string[] = [];
 
   // File paths (high signal)
-  const filePaths = prompt.match(/[\w\-\/\.]+\.(ts|tsx|js|jsx|py|rs|go|md|json|yaml|yml|toml|sql)/gi) || [];
+  const filePaths = prompt.match(/[\w\-/.]+\.(ts|tsx|js|jsx|py|rs|go|md|json|yaml|yml|toml|sql)/gi) || [];
   topics.push(...filePaths.slice(0, 5));
 
   // Quoted strings (explicit references)
@@ -327,7 +327,7 @@ async function fetchFreshContext(config: any, prompt: string, honcho: Honcho): P
   return { context: contextResult };
 }
 
-function formatCachedContext(context: any, peerName: string): { parts: string[]; conclusionCount: number } {
+function formatCachedContext(context: any, _peerName: string): { parts: string[]; conclusionCount: number } {
   const parts: string[] = [];
   let conclusionCount = 0;
   const rep = context?.representation;

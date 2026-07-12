@@ -469,7 +469,7 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
     rootValue: unknown
   ) => {
     if (value === undefined) return;
-    const hasHostOverride = Object.prototype.hasOwnProperty.call(existingHost, key);
+    const hasHostOverride = Object.hasOwn(existingHost, key);
     if (hasHostOverride || !deepEqual(value, rootValue)) {
       hostEntry[key] = value;
     }
@@ -592,7 +592,6 @@ export function getSessionName(cwd: string, instanceId?: string): string {
       }
       return base;
     }
-    case "per-directory":
     default:
       return base;
   }

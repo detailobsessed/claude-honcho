@@ -98,23 +98,6 @@ export interface SpinnerOptions {
 }
 
 /**
- * Write directly to the terminal, bypassing stdout/stderr capture
- */
-function writeTTY(text: string): void {
-  if (process.platform === "win32") {
-    process.stderr.write(text);
-    return;
-  }
-  try {
-    const fd = openSync("/dev/tty", "w");
-    writeSync(fd, text);
-    closeSync(fd);
-  } catch {
-    process.stderr.write(text);
-  }
-}
-
-/**
  * Class-based Spinner for use in hooks
  */
 export class Spinner {
