@@ -201,6 +201,16 @@ export async function drainOutbox(
     const t = Date.parse(r.queuedAt);
     return Number.isNaN(t) || now - t <= maxAgeMs;
   });
+  // Order by queue time so the count cap below drops the OLDEST records, not
+  // whatever happens to sit at the front of the claim/concat order (undated
+  // records sort last so a bad timestamp isn't preferentially kept).
+  fresh.sort((a, b) => {
+    const ta = Date.parse(a.queuedAt);
+    const tb = Date.parse(b.queuedAt);
+    if (Number.isNaN(ta)) return 1;
+    if (Number.isNaN(tb)) return -1;
+    return ta - tb;
+  });
   let dropped = records.length - fresh.length;
   let kept = fresh;
   if (fresh.length > maxRecords) {

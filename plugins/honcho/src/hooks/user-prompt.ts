@@ -31,6 +31,9 @@ const SKIP_CONTEXT_PATTERNS = [
 ];
 
 const FETCH_TIMEOUT_MS = 4000;
+// Cap the prompt upload so a slow/unreachable host can't consume the hook's
+// budget and starve the context fetch (FETCH_TIMEOUT_MS) the user waits on.
+const UPLOAD_TIMEOUT_MS = 3000;
 
 /**
  * Extract meaningful topics from a prompt for semantic search.
@@ -122,26 +125,36 @@ export async function handleUserPrompt(): Promise<void> {
   // Best-effort upload. Wrap the entire SDK interaction so a transient
   // rejection during session/peer setup can't abort context retrieval below.
   if (config.saveMessages !== false) {
+    let uploadTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const [session, userPeer] = await Promise.all([
-        honcho.session(sessionName),
-        honcho.peer(config.peerName),
+      // Race the whole SDK interaction against a timeout so it can't block
+      // longer than UPLOAD_TIMEOUT_MS. On timeout the race rejects and we fall
+      // through to the outbox below, exactly like a hard failure.
+      await Promise.race([
+        (async () => {
+          const [session, userPeer] = await Promise.all([
+            honcho.session(sessionName),
+            honcho.peer(config.peerName),
+          ]);
+          const messages = chunkContent(prompt).map((chunk) =>
+            userPeer.message(chunk, {
+              metadata: {
+                instance_id: instanceId || undefined,
+                session_affinity: sessionName,
+              },
+            })
+          );
+          logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars)`);
+          await session.addMessages(messages);
+        })(),
+        new Promise<never>((_, reject) => {
+          uploadTimer = setTimeout(() => reject(new Error("upload timeout")), UPLOAD_TIMEOUT_MS);
+        }),
       ]);
-      const chunks = chunkContent(prompt);
-      const messages = chunks.map((chunk) =>
-        userPeer.message(chunk, {
-          metadata: {
-            instance_id: instanceId || undefined,
-            session_affinity: sessionName,
-          },
-        })
-      );
-      logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars)`);
-      await session.addMessages(messages);
     } catch (e) {
       logHook("user-prompt", `Upload failed: ${e}`);
-      // Host unreachable — queue the prompt locally instead of dropping it.
-      // Drained at the next SessionStart once the host is back.
+      // Host unreachable or too slow — queue the prompt locally instead of
+      // dropping it. Drained at the next SessionStart once the host is back.
       const queuedAt = new Date().toISOString();
       enqueueOutbox(
         chunkContent(prompt).map((chunk) => ({
@@ -156,6 +169,8 @@ export async function handleUserPrompt(): Promise<void> {
           queuedAt,
         })),
       );
+    } finally {
+      clearTimeout(uploadTimer);
     }
   }
 
