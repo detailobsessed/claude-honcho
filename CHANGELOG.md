@@ -6,6 +6,21 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-07-12
+
+Reliability pass folding in fixes for several open upstream issues.
+
+### Fixed
+
+- **Configurable SDK timeout** (upstream #25): `getHonchoClientOptions` reads `HONCHO_SDK_TIMEOUT_MS` (default 8000) instead of a hardcoded 8s, so dialectic queries at high/max reasoning levels can be given room instead of always timing out.
+- **No repeated conclusions** (upstream #39): `UserPromptSubmit` tracks the conclusions it has already surfaced this session (per instance, in `context-cache.json`) and injects only new ones, cutting context bloat from the same conclusions repeating every turn.
+- **Correct hook timeout units + capped install** (upstream #59): `hooks.json` timeouts were milliseconds but Claude Code reads seconds, leaving hooks effectively uncapped; they are now in seconds (60/30/20/10/7). `ensure-deps` additionally bounds `bun install` with an internal timeout (`HONCHO_INSTALL_TIMEOUT_MS`, default 50s) and an uncatchable `SIGKILL`, so a stalled install can't wedge SessionStart.
+- **Outbox batch size** (upstream #57): `drainOutbox` sends queued messages in ≤100-item batches (Honcho's `MessageBatchCreate` cap) and, on interruption or budget exhaustion, requeues only the unsent tail — avoiding a 422 retry loop and duplicate re-sends on a large backlog.
+
+### Internal
+
+- The test suite is isolated from the ambient git environment (`GIT_DIR`/`GIT_WORK_TREE`/… are stripped and git calls run with the live env), so the pre-commit test gate no longer fails when the suite runs inside a git hook.
+
 ## [0.0.2] - 2026-07-12
 
 ### Removed
