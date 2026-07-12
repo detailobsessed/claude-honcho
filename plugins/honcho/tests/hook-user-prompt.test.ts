@@ -44,46 +44,6 @@ function readOutbox(): any[] {
     .map((l) => JSON.parse(l));
 }
 
-/**
- * `createMockHoncho`'s `peer.context()` returns `peerCard` as a bare string
- * ("mock-card"), but the real SDK (and `formatCachedContext` in
- * user-prompt.ts) expects an array of strings and calls `.join()` on it —
- * so the shared mock crashes any test that reaches `serveContext` with a
- * freshly-fetched context. Per the task's constraints, helpers.ts is not
- * edited — this local double mirrors its record pattern with a correctly
- * shaped `peerCard` array instead.
- */
-function createContextHoncho(contextResult: any): any {
-  const calls: Record<string, any[]> = {};
-  function record(name: string, args: any[]) {
-    if (!calls[name]) calls[name] = [];
-    calls[name].push(args);
-  }
-  const mockSession = (name: string) => ({
-    addMessages: async (messages: any[]) => {
-      record("session.addMessages", [name, messages]);
-    },
-  });
-  const mockPeer = (name: string) => ({
-    message: (content: string, opts?: any) => ({ peerName: name, content, opts }),
-    context: async (opts?: any) => {
-      record("peer.context", [name, opts]);
-      return contextResult;
-    },
-  });
-  return {
-    calls,
-    session: async (name: string) => {
-      record("session", [name]);
-      return mockSession(name);
-    },
-    peer: async (name: string) => {
-      record("peer", [name]);
-      return mockPeer(name);
-    },
-  };
-}
-
 describe("user-prompt hook", () => {
   let exitSpy: ReturnType<typeof stubExit>;
   let honcho: ReturnType<typeof createMockHoncho>;
@@ -157,9 +117,11 @@ describe("user-prompt hook", () => {
 
   test("fetches fresh context via search when no cache exists, using topics from the prompt", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
-    const contextHoncho = createContextHoncho({
-      representation: "- debugs auth issues carefully",
-      peerCard: ["Backend engineer"],
+    const contextHoncho = createMockHoncho({
+      contextResult: {
+        representation: "- debugs auth issues carefully",
+        peerCard: ["Backend engineer"],
+      },
     });
     setHoncho(contextHoncho);
     const logSpy = spyOn(console, "log");

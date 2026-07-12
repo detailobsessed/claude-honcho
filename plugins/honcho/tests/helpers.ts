@@ -76,10 +76,13 @@ export function clearHonchoDir(honchoDir: string): void {
 }
 
 /**
- * A minimal mock of the Honcho SDK client.
- * Tracks all method calls so tests can assert on them.
+ * A minimal mock of the Honcho SDK client. Tracks all method calls so tests can
+ * assert on them. Pass `contextResult` / `summaries` to control what
+ * `peer.context()` / `session.summaries()` resolve to.
  */
-export function createMockHoncho(): any {
+export function createMockHoncho(
+  overrides: { contextResult?: any; summaries?: any } = {},
+): any {
   const calls: Record<string, any[]> = {};
 
   function record(name: string, args: any[]) {
@@ -92,6 +95,7 @@ export function createMockHoncho(): any {
     name,
     addPeers: async (...args: any[]) => { record("session.addPeers", [name, ...args]); },
     addMessages: async (messages: any[]) => { record("session.addMessages", [name, messages]); },
+    summaries: async () => { record("session.summaries", [name]); return overrides.summaries ?? null; },
   });
 
   const mockPeer = (name: string) => ({
@@ -100,7 +104,8 @@ export function createMockHoncho(): any {
     message: (content: string, opts?: any) => ({ peerName: name, content, opts }),
     context: async (opts?: any) => {
       record("peer.context", [name, opts]);
-      return { representation: "mock-representation", peerCard: "mock-card" };
+      // peerCard is an array of strings, matching the real SDK (callers .join() it).
+      return overrides.contextResult ?? { representation: "mock-representation", peerCard: ["mock-card"] };
     },
     chat: async (query: string, opts?: any) => {
       record("peer.chat", [name, query, opts]);
