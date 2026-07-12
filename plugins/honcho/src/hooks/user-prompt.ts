@@ -79,6 +79,38 @@ function shouldSkipContextRetrieval(prompt: string): boolean {
   return SKIP_CONTEXT_PATTERNS.some((p) => p.test(prompt.trim()));
 }
 
+// Claude Code injects non-user turns into the UserPromptSubmit hook wrapped in
+// these markers: background-task completions, `!`-bash command echoes and their
+// output, slash-command invocations and their stdout, and system reminders.
+// None are the user speaking, yet they were being uploaded as ordinary user
+// messages — so Honcho's deriver minted plumbing "conclusions" ("received a
+// task-notification with task-id ...", "used a tool with tool-use-id ...") that
+// pollute the memory graph (upstream #66).
+const HARNESS_TURN_TAGS = [
+  "task-notification",
+  "bash-input",
+  "bash-stdout",
+  "bash-stderr",
+  "command-name",
+  "command-message",
+  "command-args",
+  "local-command-stdout",
+  "local-command-stderr",
+  "local-command-caveat",
+  "system-reminder",
+];
+// Anchor on the OPENING tag at the very start of the (trimmed) prompt. A real
+// user essentially never begins a message with one of these literal tags, and
+// matching "starts-with" (not "contains") preserves genuine prompts that quote
+// a tag mid-text or have a system-reminder appended after the user's words. The
+// trailing [\s>] is a word boundary so `<command-name>` matches but a
+// hypothetical `<command-names-of-things>` would not.
+const HARNESS_TURN_PATTERN = new RegExp(`^<(${HARNESS_TURN_TAGS.join("|")})[\\s>]`);
+
+export function isHarnessTurn(prompt: string): boolean {
+  return HARNESS_TURN_PATTERN.test(prompt.trim());
+}
+
 function formatSessionLink(sessionUrl: string): string {
   return `view your session in honcho GUI: ${sessionUrl}`;
 }
@@ -122,6 +154,15 @@ export async function handleUserPrompt(): Promise<void> {
   setLogContext(cwd, sessionName);
 
   if (!prompt.trim()) {
+    process.exit(0);
+  }
+
+  // Non-user turns injected by the Claude Code harness (task notifications,
+  // bash-command echoes, slash-command output, system reminders) reach this
+  // hook too. They are not the user speaking: don't capture them to memory and
+  // don't spend a context fetch on them. See isHarnessTurn (upstream #66).
+  if (isHarnessTurn(prompt)) {
+    logHook("user-prompt", "Skipping harness-injected turn (not user input)");
     process.exit(0);
   }
 

@@ -24,8 +24,9 @@ let formatCachedContext: (context: any, peerName: string, seen?: string[]) => {
   conclusionCount: number;
   newConclusions: string[];
 };
+let isHarnessTurn: (prompt: string) => boolean;
 beforeAll(async () => {
-  ({ handleUserPrompt, formatCachedContext } = await import("../src/hooks/user-prompt.ts") as any);
+  ({ handleUserPrompt, formatCachedContext, isHarnessTurn } = await import("../src/hooks/user-prompt.ts") as any);
 });
 
 function baseConfig(extra: Record<string, unknown> = {}) {
@@ -206,5 +207,76 @@ describe("formatCachedContext dedup (#39: don't re-inject the same conclusions e
     const result = formatCachedContext(context, "user", seen);
     expect(result.parts.some((p) => p.startsWith("Relevant conclusions:"))).toBe(false);
     expect(result.newConclusions).toEqual([]);
+  });
+});
+
+describe("isHarnessTurn (#66: don't upload harness-injected turns as user messages)", () => {
+  test("flags a background task-notification (the turn that polluted the graph)", () => {
+    expect(
+      isHarnessTurn(
+        "<task-notification>The task with ID a6ca4d completed. Output saved to /private/tmp/x.output</task-notification>",
+      ),
+    ).toBe(true);
+  });
+
+  test("flags bash-command echoes and slash-command invocations/output", () => {
+    expect(isHarnessTurn("<bash-input>git status</bash-input>")).toBe(true);
+    expect(isHarnessTurn("<command-name>/honcho:setup</command-name>")).toBe(true);
+    expect(isHarnessTurn("<local-command-stdout>done</local-command-stdout>")).toBe(true);
+    expect(isHarnessTurn("  \n<system-reminder>be brief</system-reminder>")).toBe(true);
+  });
+
+  test("does NOT flag a genuine user prompt, even one that quotes a wrapper tag mid-text", () => {
+    expect(isHarnessTurn("how do I fix this bug")).toBe(false);
+    expect(isHarnessTurn("the hook receives a <task-notification> tag — how do I skip it?")).toBe(false);
+    // A real prompt with a system-reminder appended after the user's text must survive.
+    expect(
+      isHarnessTurn("please refactor outbox.ts\n<system-reminder>context follows</system-reminder>"),
+    ).toBe(false);
+  });
+});
+
+describe("user-prompt hook: harness turns (#66)", () => {
+  let exitSpy: ReturnType<typeof stubExit>;
+  let honcho: ReturnType<typeof createMockHoncho>;
+
+  beforeEach(() => {
+    clearSharedHonchoDir();
+    clearHonchoEnv();
+    setDetectedHost("claude_code");
+    exitSpy = stubExit();
+    honcho = createMockHoncho();
+    setHoncho(honcho);
+    cacheStdin("{}");
+  });
+  afterEach(() => exitSpy.mockRestore());
+
+  test("a task-notification is neither uploaded nor spends a context fetch", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    setCachedUserContext({ representation: "- likes TypeScript", peerCard: ["Engineer"] });
+    cacheStdin(
+      JSON.stringify({
+        session_id: "s1",
+        cwd: "/tmp/proj",
+        prompt:
+          "<task-notification>The task with ID a6ca4d completed. Output saved to /private/tmp/x.output</task-notification>",
+      }),
+    );
+
+    expect(await runHook(handleUserPrompt)).toBe(0);
+
+    // The whole point of #66: this turn must not become a user message.
+    expect(honcho.calls["session.addMessages"]).toBeUndefined();
+    // ...and it shouldn't burn a dialectic fetch either.
+    expect(honcho.calls["peer.context"]).toBeUndefined();
+  });
+
+  test("a genuine prompt is still uploaded", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    cacheStdin(JSON.stringify({ session_id: "s1", cwd: "/tmp/proj", prompt: "how do I fix this bug" }));
+
+    expect(await runHook(handleUserPrompt)).toBe(0);
+
+    expect(honcho.calls["session.addMessages"]).toHaveLength(1);
   });
 });

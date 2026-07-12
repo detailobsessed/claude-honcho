@@ -6,6 +6,12 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-07-12
+
+### Fixed
+
+- **Harness turns no longer pollute memory** (upstream #66): Claude Code fires `UserPromptSubmit` for turns the user never typed — background task-notifications, `!`-bash command echoes, slash-command output, and system reminders. These were uploaded as user messages, so Honcho's deriver minted plumbing "conclusions" (`received a task-notification with task-id …`, `used a tool with tool-use-id toolu_…`) that polluted the memory graph. The hook now recognizes these harness-wrapped turns (matching a known opening tag at the very start of the prompt, so genuine prompts that merely quote a tag are untouched) and skips them — no upload, no context fetch.
+
 ## [0.0.3] - 2026-07-12
 
 Reliability pass folding in fixes for several open upstream issues.
