@@ -38,12 +38,19 @@ beforeEach(() => {
 });
 
 afterAll(() => {
-  if (originalHonchoApiKey !== undefined) process.env.HONCHO_API_KEY = originalHonchoApiKey;
-  if (originalHonchoPeerName !== undefined) process.env.HONCHO_PEER_NAME = originalHonchoPeerName;
-  if (originalHonchoWorkspace !== undefined) process.env.HONCHO_WORKSPACE = originalHonchoWorkspace;
-  if (originalHonchoHost !== undefined) process.env.HONCHO_HOST = originalHonchoHost;
-  if (originalHonchoEnabled !== undefined) process.env.HONCHO_ENABLED = originalHonchoEnabled;
-  if (originalCursorProjectDir !== undefined) process.env.CURSOR_PROJECT_DIR = originalCursorProjectDir;
+  // Restore each var to its original value, or delete it if it was unset —
+  // a bare "restore only if defined" leaks vars a test set (e.g. HONCHO_ENABLED)
+  // into later test files.
+  const restore = (key: string, original: string | undefined) => {
+    if (original !== undefined) process.env[key] = original;
+    else delete process.env[key];
+  };
+  restore("HONCHO_API_KEY", originalHonchoApiKey);
+  restore("HONCHO_PEER_NAME", originalHonchoPeerName);
+  restore("HONCHO_WORKSPACE", originalHonchoWorkspace);
+  restore("HONCHO_HOST", originalHonchoHost);
+  restore("HONCHO_ENABLED", originalHonchoEnabled);
+  restore("CURSOR_PROJECT_DIR", originalCursorProjectDir);
 });
 
 describe("detectHost", () => {
