@@ -43,6 +43,7 @@ coverage/
 
 # Claude Code project-specific settings (user-specific)
 .claude/
+.serena/
 CLAUDE.md
 
 # Temporary files
