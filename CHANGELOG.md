@@ -99,7 +99,7 @@ All notable changes to claude-honcho will be documented in this file.
 ### Added
 
 - Visual logging with pixel art banner
-- Configurable file logging to `~/.honcho/` (on by default, togglable)
+- Configurable file logging to `~/.honcho/` (on by default, toggleable)
 - Session name prefixing with `peerName` (configurable, default on)
 - Installation instructions for adding to Claude Code
 
