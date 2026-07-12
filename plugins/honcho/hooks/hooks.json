@@ -6,7 +6,14 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.ts",
+            "command": "bun",
+            "args": ["run", "${CLAUDE_PLUGIN_ROOT}/hooks/ensure-deps.ts"],
+            "timeout": 60000
+          },
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["run", "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.ts"],
             "timeout": 30000,
             "async": true
           }
@@ -19,7 +26,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.ts",
+            "command": "bun",
+            "args": ["run", "${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.ts"],
             "timeout": 10000
           }
         ]
@@ -30,7 +38,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.ts",
+            "command": "bun",
+            "args": ["run", "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.ts"],
             "timeout": 7000
           }
         ]
@@ -42,7 +51,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts",
+            "command": "bun",
+            "args": ["run", "${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts"],
             "timeout": 20000
           }
         ]
@@ -52,7 +62,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts",
+            "command": "bun",
+            "args": ["run", "${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.ts"],
             "timeout": 20000
           }
         ]
@@ -63,7 +74,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/stop.ts",
+            "command": "bun",
+            "args": ["run", "${CLAUDE_PLUGIN_ROOT}/hooks/stop.ts"],
             "timeout": 10000
           }
         ]
