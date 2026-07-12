@@ -3,7 +3,7 @@
 [![Honcho Banner](./assets/honcho_clawd.png)](https://honcho.dev)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.4-blue)](https://github.com/plastic-labs/claude-honcho)
+[![Version](https://img.shields.io/badge/version-0.0.1-blue)](https://github.com/plastic-labs/claude-honcho)
 [![Honcho](https://img.shields.io/badge/Honcho-Memory%20API-blue)](https://honcho.dev)
 
 A plugin marketplace for Claude Code, powered by [Honcho](https://honcho.dev) from Plastic Labs.
