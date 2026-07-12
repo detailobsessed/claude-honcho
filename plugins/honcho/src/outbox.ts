@@ -29,6 +29,8 @@ const MAX_OUTBOX_BYTES = 5 * 1024 * 1024;
 // Drain-pass defaults; callers may override.
 const DEFAULT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const DEFAULT_MAX_RECORDS = 1000;
+// Honcho's MessageBatchCreate rejects (422) more than 100 items per call.
+const MAX_ADD_MESSAGES_BATCH = 100;
 const DEFAULT_TIME_BUDGET_MS = 8000;
 
 // A claim file older than this is treated as orphaned (a drain that crashed)
@@ -237,6 +239,7 @@ export async function drainOutbox(
       break;
     }
     const [sessionName, group] = groups[i];
+    let sentInGroup = 0;
     let budgetTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       // Bound the whole round trip by the remaining budget. The deadline used
@@ -260,7 +263,22 @@ export async function drainOutbox(
               }),
             );
           }
-          await session.addMessages(messages);
+          // Send in <=100-item chunks so a large backlog can't 422 and wedge
+          // the group in a retry loop. Track landed records so a mid-group
+          // failure requeues only the unsent tail (no duplicate re-sends).
+          //
+          // The deadline guard is load-bearing: Promise.race below only unblocks
+          // the await on timeout — it can't cancel this loop. Without the guard,
+          // a timed-out drain would keep sending later chunks in the background
+          // while the catch requeues those same records, producing duplicates.
+          for (
+            let start = 0;
+            start < messages.length && Date.now() < deadline;
+            start += MAX_ADD_MESSAGES_BATCH
+          ) {
+            await session.addMessages(messages.slice(start, start + MAX_ADD_MESSAGES_BATCH));
+            sentInGroup = Math.min(start + MAX_ADD_MESSAGES_BATCH, group.length);
+          }
         })(),
         new Promise<never>((_, reject) => {
           budgetTimer = setTimeout(
@@ -271,9 +289,15 @@ export async function drainOutbox(
       ]);
       sent += group.length;
     } catch (e) {
-      // Host went away again mid-drain, or the budget ran out — requeue the
-      // remainder (this group included) and stop this pass.
+      // Host went away again mid-drain, or the budget ran out. Requeue only the
+      // records this group hasn't confirmed sent; untried groups are requeued
+      // by the loop below.
       log(`outbox: drain interrupted (${e})`);
+      if (sentInGroup < group.length) {
+        unsent.push(...group.slice(sentInGroup));
+      }
+      sent += sentInGroup;
+      i++;
       break;
     } finally {
       clearTimeout(budgetTimer);
