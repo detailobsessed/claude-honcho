@@ -6,6 +6,21 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-07-12
+
+### Removed
+
+- `scripts/check-version.sh` — an update nag that curled upstream's (`plastic-labs`) marketplace and compared against it. It was already unwired from the hooks, pointed at upstream rather than this fork, and duplicates Claude Code's own marketplace version check.
+
+### Changed
+
+- The plugin version now lives in a single place — `plugins/honcho/.claude-plugin/plugin.json`. The redundant `version` fields were removed from `package.json` (which Claude Code never reads) and from the marketplace `metadata` (which is the catalog's version, not the plugin's). Claude Code resolves a plugin's version from `plugin.json` first, so it is the sole source of truth; one file to bump per release.
+
+### Documentation
+
+- README now explains how to turn on marketplace auto-update so Claude Code surfaces new fork versions on startup.
+- The README version badge reads `plugin.json` dynamically, so it tracks the single source of truth with no manual edit.
+
 ## [0.0.1] - 2026-07-12
 
 First release of the fork, forked from upstream v0.2.7.

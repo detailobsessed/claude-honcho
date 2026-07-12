@@ -3,7 +3,7 @@
 [![Honcho Banner](./assets/honcho_clawd.png)](https://honcho.dev)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.0.1-blue)](https://github.com/detailobsessed/claude-honcho)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdetailobsessed%2Fclaude-honcho%2Fmain%2Fplugins%2Fhoncho%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue&prefix=v)](https://github.com/detailobsessed/claude-honcho)
 
 A community-maintained fork of [`plastic-labs/claude-honcho`](https://github.com/plastic-labs/claude-honcho) — persistent memory for Claude Code, powered by [Honcho](https://honcho.dev) from Plastic Labs.
 
@@ -42,6 +42,9 @@ You'll need [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`) a
 3. **Restart Claude Code.** Memory loads silently in the background on each session start — there is no startup banner or pixel art. Confirm it's live with `/honcho:status`, or by tailing `~/.honcho/activity.log`.
 
 4. **Run `/honcho:setup` (recommended).** Memory already works off the `HONCHO_API_KEY` environment variable alone, but `setup` makes it solid: it validates the key against the API, writes `~/.honcho/config.json` so configuration no longer depends on the env var reaching every subprocess, and installs the memory statusLine. (If you already run a custom statusLine, setup leaves it untouched and just prints how to switch.)
+
+> [!TIP]
+> **Get notified of fork updates.** Claude Code leaves auto-update **off** by default for community marketplaces, so it won't tell you a new version shipped until you look. To have it pull updates on startup, open `/plugin` → **Marketplaces**, select **honcho**, and turn on auto-update. Prefer to stay manual? Run `/plugin marketplace update honcho` now and then, then check `/plugin` for the new version.
 
 This covers the essentials. For the complete walkthrough — Windows setup, optional environment variables (`HONCHO_PEER_NAME`, `HONCHO_WORKSPACE`), the intro interview (`/honcho:interview`), the `~/.claude/CLAUDE.md` directives, the full configuration reference, and troubleshooting — see the **[upstream README](https://github.com/plastic-labs/claude-honcho#readme)**. It predates this fork, so **install via `detailobsessed/claude-honcho` as shown above**, not the `plastic-labs` marketplace it references.
 
