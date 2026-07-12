@@ -11,6 +11,8 @@ import {
   markKnowledgeGraphRefreshed,
   getInstanceIdForCwd,
   chunkContent,
+  getInjectedConclusions,
+  addInjectedConclusions,
 } from "../cache.js";
 import { logHook, logApiCall, logCache, setLogContext } from "../log.js";
 import { visContextLine, visSkipMessage, addSystemMessage, verboseApiResult, verboseList } from "../visual.js";
@@ -222,7 +224,7 @@ export async function handleUserPrompt(): Promise<void> {
     verboseApiResult("peer.context() -> representation (cached)", cachedContext?.representation);
     verboseList("peer.context() -> peerCard (cached)", cachedContext?.peerCard);
 
-    serveContext(config.peerName, cachedContext, true, sessionLink);
+    serveContext(config.peerName, cachedContext, true, instanceId || "", sessionLink);
     process.exit(0);
   }
 
@@ -240,7 +242,7 @@ export async function handleUserPrompt(): Promise<void> {
       markKnowledgeGraphRefreshed();
     }
     if (context) {
-      serveContext(config.peerName, context, false, sessionLink);
+      serveContext(config.peerName, context, false, instanceId || "", sessionLink);
       process.exit(0);
     }
   }
@@ -249,7 +251,7 @@ export async function handleUserPrompt(): Promise<void> {
   const staleContext = getStaleCachedUserContext();
   if (staleContext) {
     logHook("user-prompt", "Serving stale cache after timeout");
-    serveContext(config.peerName, staleContext, true, sessionLink);
+    serveContext(config.peerName, staleContext, true, instanceId || "", sessionLink);
   }
   // No cache at all — exit silently, context will arrive after session-start completes
 
@@ -263,13 +265,17 @@ function serveContext(
   peerName: string,
   context: any,
   cached: boolean,
+  instanceId: string,
   sessionLink?: string,
 ): void {
-  const { parts: contextParts } = formatCachedContext(context, peerName);
+  const seen = instanceId ? getInjectedConclusions(instanceId) : [];
+  const { parts: contextParts, newConclusions } = formatCachedContext(context, peerName, seen);
   if (contextParts.length === 0) return;
 
   const visMsg = visContextLine("user-prompt", { cached });
   outputContext(peerName, contextParts, sessionLink ? `${sessionLink}\n${visMsg}` : visMsg);
+
+  if (instanceId && newConclusions.length) addInjectedConclusions(instanceId, newConclusions);
 }
 
 async function fetchFreshContext(config: any, prompt: string, honcho: Honcho): Promise<{ context: any }> {
@@ -327,17 +333,26 @@ async function fetchFreshContext(config: any, prompt: string, honcho: Honcho): P
   return { context: contextResult };
 }
 
-function formatCachedContext(context: any, _peerName: string): { parts: string[]; conclusionCount: number } {
+export function formatCachedContext(
+  context: any,
+  _peerName: string,
+  seen: string[] = [],
+): { parts: string[]; conclusionCount: number; newConclusions: string[] } {
   const parts: string[] = [];
   let conclusionCount = 0;
+  let newConclusions: string[] = [];
   const rep = context?.representation;
 
   if (typeof rep === "string" && rep.trim()) {
     const lines = rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#"));
-    const selected = lines.slice(0, 5);
-    conclusionCount = selected.length;
-    const summary = selected.map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, "")).join("; ");
-    if (summary) parts.push(`Relevant conclusions: ${summary}`);
+    const cleaned = lines.map((l: string) => l.replace(/^\[.*?\]\s*/, "").replace(/^- /, ""));
+    const unseen = cleaned.filter((l: string) => !seen.includes(l));
+    const selected = unseen.slice(0, 5);
+    if (selected.length) {
+      newConclusions = selected;
+      conclusionCount = selected.length;
+      parts.push(`Relevant conclusions: ${selected.join("; ")}`);
+    }
   }
 
   const peerCard = context?.peerCard;
@@ -345,7 +360,7 @@ function formatCachedContext(context: any, _peerName: string): { parts: string[]
     parts.push(`Profile: ${peerCard.join("; ")}`);
   }
 
-  return { parts, conclusionCount };
+  return { parts, conclusionCount, newConclusions };
 }
 
 function outputContext(peerName: string, contextParts: string[], systemMsg?: string): void {

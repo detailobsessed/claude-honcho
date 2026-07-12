@@ -328,6 +328,55 @@ describe("chunkContent", () => {
   });
 });
 
+describe("Injected Conclusions", () => {
+  it("getInjectedConclusions returns empty array by default", async () => {
+    const mod = await import("../src/cache.js");
+    expect(mod.getInjectedConclusions("instance-1")).toEqual([]);
+  });
+
+  it("addInjectedConclusions then getInjectedConclusions round-trips", async () => {
+    const mod = await import("../src/cache.js");
+    mod.addInjectedConclusions("instance-1", ["likes TypeScript", "uses Bun"]);
+    expect(mod.getInjectedConclusions("instance-1")).toEqual(["likes TypeScript", "uses Bun"]);
+  });
+
+  it("adding duplicates does not grow the list", async () => {
+    const mod = await import("../src/cache.js");
+    mod.addInjectedConclusions("instance-1", ["likes TypeScript"]);
+    mod.addInjectedConclusions("instance-1", ["likes TypeScript", "uses Bun"]);
+    expect(mod.getInjectedConclusions("instance-1")).toEqual(["likes TypeScript", "uses Bun"]);
+  });
+
+  it("two different instanceIds are isolated", async () => {
+    const mod = await import("../src/cache.js");
+    mod.addInjectedConclusions("instance-1", ["likes TypeScript"]);
+    mod.addInjectedConclusions("instance-2", ["debugs auth"]);
+    expect(mod.getInjectedConclusions("instance-1")).toEqual(["likes TypeScript"]);
+    expect(mod.getInjectedConclusions("instance-2")).toEqual(["debugs auth"]);
+  });
+
+  it("caps each session's array to the most recent 200 entries", async () => {
+    const mod = await import("../src/cache.js");
+    const first150 = Array.from({ length: 150 }, (_, i) => `conclusion-${i}`);
+    mod.addInjectedConclusions("instance-1", first150);
+    const next100 = Array.from({ length: 100 }, (_, i) => `conclusion-${150 + i}`);
+    mod.addInjectedConclusions("instance-1", next100);
+    const result = mod.getInjectedConclusions("instance-1");
+    expect(result.length).toBe(200);
+    // Should have kept the most recent 200 (i.e. the last 200 of the combined 250)
+    expect(result[0]).toBe("conclusion-50");
+    expect(result[result.length - 1]).toBe("conclusion-249");
+  });
+
+  it("falsy instanceId is a no-op", async () => {
+    const mod = await import("../src/cache.js");
+    mod.addInjectedConclusions("", ["should not be stored"]);
+    expect(mod.getInjectedConclusions("")).toEqual([]);
+    const cache = mod.loadContextCache();
+    expect(cache.injectedConclusions).toBeUndefined();
+  });
+});
+
 describe("Context cache ghost key cleanup", () => {
   it("strips unknown keys from context cache on load", async () => {
     const mod = await import("../src/cache.js");
