@@ -1,0 +1,43 @@
+name: Release
+
+# Publish a GitHub Release when a v* tag is pushed. The version in
+# plugins/honcho/.claude-plugin/plugin.json is the single source of truth; the
+# tag must match it. Cut a release with:
+#   git tag v0.0.2 && git push origin v0.0.2
+# Release notes are the matching section of CHANGELOG.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish release
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Verify tag matches plugin.json
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have=$(jq -r '.version' plugins/honcho/.claude-plugin/plugin.json)
+          if [ "$want" != "$have" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match plugin.json version $have"
+            exit 1
+          fi
+
+      - name: Extract this version's changelog
+        run: |
+          awk -v ver="${GITHUB_REF_NAME#v}" '
+            index($0, "## [" ver "]") == 1 { grab = 1; next }
+            grab && index($0, "## [") == 1 { exit }
+            grab { print }
+          ' CHANGELOG.md > release-notes.md
+          [ -s release-notes.md ] || echo "Release ${GITHUB_REF_NAME}" > release-notes.md
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          body_path: release-notes.md
