@@ -3,7 +3,7 @@
 [![Honcho Banner](../assets/honcho_clawd.png)](https://honcho.dev)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.0.1-blue)](https://github.com/plastic-labs/claude-honcho)
+[![Version](https://img.shields.io/badge/version-0.0.1-blue)](https://github.com/detailobsessed/claude-honcho)
 [![Honcho](https://img.shields.io/badge/Honcho-Memory%20API-blue)](https://honcho.dev)
 
 A plugin marketplace for Claude Code, powered by [Honcho](https://honcho.dev) from Plastic Labs.
@@ -22,7 +22,7 @@ A plugin marketplace for Claude Code, powered by [Honcho](https://honcho.dev) fr
 Add the marketplace to Claude Code:
 
 ```
-/plugin marketplace add plastic-labs/claude-honcho
+/plugin marketplace add detailobsessed/claude-honcho
 ```
 
 Then install the plugin(s) you want:
@@ -93,7 +93,7 @@ Then restart your terminal so the new variables take effect.
 ### Step 3: Install the Plugin
 
 ```
-/plugin marketplace add plastic-labs/claude-honcho
+/plugin marketplace add detailobsessed/claude-honcho
 /plugin install honcho@honcho
 ```
 
@@ -407,7 +407,7 @@ Multiple people can share context by pointing to the same workspace. Each person
 }
 ```
 
-Both Alice and Bob write to the `team-acme` workspace. Their sessions are namespaced (e.g., `alice-my-project`, `bob-my-project`) so data doesn't collide, but Honcho's dialectic reasoning can draw on context from both users. If you want fully independent sessions, set `sessionPeerPrefix: false` — but this is not recommended in shared workspaces.
+Both Alice and Bob write to the `team-acme` workspace. Their sessions are namespaced (e.g., `alice-my-project`, `bob-my-project`) so data doesn't collide, but Honcho's dialectic reasoning can draw on context from both users. Sessions are already independent by default thanks to this namespacing; if you instead want everyone working in a directory to share a single session, set `sessionPeerPrefix: false` — but this is not recommended in shared workspaces.
 
 ### Environment Variables
 
