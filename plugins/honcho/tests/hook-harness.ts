@@ -102,6 +102,9 @@ export function createFailingHoncho(message = "host unreachable"): any {
         addMessages: async () => {
           throw new Error(message);
         },
+        summaries: async () => {
+          throw new Error(message);
+        },
       };
     },
     peer: async (name: string) => {

@@ -8,18 +8,12 @@
  * transcript right before compaction, honors the observation-mode read lens,
  * and degrades gracefully (never blocking compaction) when Honcho is
  * unreachable.
- *
- * `createMockHoncho` (tests/helpers.ts) has no `session.summaries()` method,
- * which this hook calls. Per the task's constraints, helpers.ts is not
- * edited — instead this file defines small inline mocks below that mirror
- * `createMockHoncho`'s / `createFailingHoncho`'s record pattern, extended
- * with `summaries()`.
  */
 import { describe, test, expect, beforeEach, afterEach, beforeAll } from "bun:test";
 import { spyOn } from "bun:test";
 import { SHARED_HONCHO_DIR, clearSharedHonchoDir } from "./setup";
 import { createMockHoncho, writeHonchoConfig } from "./helpers";
-import { setHoncho, stubExit, runHook, clearHonchoEnv } from "./hook-harness";
+import { setHoncho, stubExit, runHook, clearHonchoEnv, createFailingHoncho } from "./hook-harness";
 import { cacheStdin, setDetectedHost } from "../src/config";
 
 let handlePreCompact: () => Promise<void>;
@@ -36,85 +30,6 @@ function baseConfig(extra: Record<string, unknown> = {}) {
     saveMessages: true,
     enabled: true,
     ...extra,
-  };
-}
-
-/** A Honcho double whose session also exposes `summaries()`, which pre-compact needs. */
-function createMockHonchoWithSummaries(summaries: any): any {
-  const calls: Record<string, any[]> = {};
-  function record(name: string, args: any[]) {
-    if (!calls[name]) calls[name] = [];
-    calls[name].push(args);
-  }
-  const mockSession = (name: string) => ({
-    id: `session-${name}`,
-    name,
-    summaries: async () => {
-      record("session.summaries", [name]);
-      return summaries;
-    },
-    addMessages: async (messages: any[]) => {
-      record("session.addMessages", [name, messages]);
-    },
-  });
-  const mockPeer = (name: string) => ({
-    id: `peer-${name}`,
-    name,
-    message: (content: string, opts?: any) => ({ peerName: name, content, opts }),
-    context: async (opts?: any) => {
-      record("peer.context", [name, opts]);
-      return { representation: "mock-representation", peerCard: ["mock-card"] };
-    },
-    chat: async (query: string, opts?: any) => {
-      record("peer.chat", [name, query, opts]);
-      return "mock-chat-response";
-    },
-  });
-  return {
-    calls,
-    session: async (name: string) => {
-      record("session", [name]);
-      return mockSession(name);
-    },
-    peer: async (name: string) => {
-      record("peer", [name]);
-      return mockPeer(name);
-    },
-  };
-}
-
-/** A Honcho double whose session/peer resolve fine, but every method on them rejects. */
-function createFailingHonchoWithSummaries(message = "host unreachable"): any {
-  const calls: Record<string, any[]> = {};
-  function record(name: string, args: any[]) {
-    if (!calls[name]) calls[name] = [];
-    calls[name].push(args);
-  }
-  return {
-    calls,
-    session: async (name: string) => {
-      record("session", [name]);
-      return {
-        summaries: async () => {
-          throw new Error(message);
-        },
-        addMessages: async () => {
-          throw new Error(message);
-        },
-      };
-    },
-    peer: async (name: string) => {
-      record("peer", [name]);
-      return {
-        message: (content: string, opts?: any) => ({ peerName: name, content, opts }),
-        context: async () => {
-          throw new Error(message);
-        },
-        chat: async () => {
-          throw new Error(message);
-        },
-      };
-    },
   };
 }
 
@@ -148,8 +63,8 @@ describe("pre-compact hook", () => {
 
   test("anchors memory with context, summaries, and dialectic on the happy path (unified mode)", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
-    const richHoncho = createMockHonchoWithSummaries({
-      shortSummary: { content: "We were refactoring the auth module." },
+    const richHoncho = createMockHoncho({
+      summaries: { shortSummary: { content: "We were refactoring the auth module." } },
     });
     setHoncho(richHoncho);
     const logSpy = spyOn(console, "log");
@@ -179,7 +94,7 @@ describe("pre-compact hook", () => {
 
   test("directional mode queries the AI peer's lens with target", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig({ observationMode: "directional" }));
-    const richHoncho = createMockHonchoWithSummaries({ shortSummary: null });
+    const richHoncho = createMockHoncho({ summaries: { shortSummary: null } });
     setHoncho(richHoncho);
     cacheStdin(JSON.stringify({ session_id: "s2", cwd: "/tmp/proj", trigger: "manual" }));
 
@@ -198,7 +113,7 @@ describe("pre-compact hook", () => {
 
   test("degrades to a header-only anchor when context/summaries/dialectic all fail", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
-    const failingHoncho = createFailingHonchoWithSummaries();
+    const failingHoncho = createFailingHoncho();
     setHoncho(failingHoncho);
     const logSpy = spyOn(console, "log");
     cacheStdin(JSON.stringify({ session_id: "s3", cwd: "/tmp/proj", trigger: "manual" }));
