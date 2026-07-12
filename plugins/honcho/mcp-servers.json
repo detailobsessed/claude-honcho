@@ -1,6 +1,6 @@
 {
   "honcho": {
-    "command": "/bin/sh",
-    "args": ["-c", "exec $HOME/.bun/bin/bun run ${CLAUDE_PLUGIN_ROOT}/mcp-server.ts"]
+    "command": "bun",
+    "args": ["run", "${CLAUDE_PLUGIN_ROOT}/mcp-server.ts"]
   }
 }

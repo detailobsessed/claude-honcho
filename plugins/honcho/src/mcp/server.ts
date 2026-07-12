@@ -763,8 +763,9 @@ export async function runMcpServer(): Promise<void> {
     if (name === "list_conclusions" || name === "delete_conclusion") {
       try {
         const observationMode = getObservationMode(config);
-        // unified: (observer=user, observed=user); directional: (observer=aiPeer, observed=user)
-        const scopePeer = observationMode === "unified"
+        // unified & hybrid read from the user's self-spine (observer=user,
+        // observed=user); directional reads the AI peer's view (observer=aiPeer).
+        const scopePeer = readsAsUnified(observationMode)
           ? await honcho.peer(config.peerName)
           : await honcho.peer(config.aiPeer);
         const conclusionScope = scopePeer.conclusionsOf(config.peerName);
