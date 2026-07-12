@@ -38,13 +38,11 @@ You'll need [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`) a
 
 3. **Restart Claude Code.** You should see the Honcho pixel art and memory loading on startup.
 
-This covers the essentials. The full walkthrough — Windows setup, optional environment variables, the intro interview (`/honcho:interview`), and the `~/.claude/CLAUDE.md` directives that tell Claude how to actually use its memory — is in **[docs/README.md](docs/README.md)**.
+This covers the essentials. For the complete walkthrough — Windows setup, optional environment variables (`HONCHO_PEER_NAME`, `HONCHO_WORKSPACE`), the intro interview (`/honcho:interview`), the `~/.claude/CLAUDE.md` directives, the full configuration reference, and troubleshooting — see the **[upstream README](https://github.com/plastic-labs/claude-honcho#readme)**. It predates this fork, so **install via `detailobsessed/claude-honcho` as shown above**, not the `plastic-labs` marketplace it references.
 
 ## What it does
 
 Gives Claude Code long-term memory that survives context wipes, restarts, and `ctrl+c` — your preferences, your projects, and what Claude was doing, across everything you work on.
-
-**Full setup, configuration, and troubleshooting live in [docs/README.md](docs/README.md).**
 
 ## Credit & license
 
