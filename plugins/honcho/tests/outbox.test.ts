@@ -306,3 +306,72 @@ describe("Outbox data loss prevention (regression tests for #45, #57)", () => {
     expect(remaining.map((r) => r.sessionName)).toContain("sess-3");
   });
 });
+
+describe("drainOutbox batching (#57)", () => {
+  it("chunks a session's messages into <=100-item addMessages batches", async () => {
+    const mod = await import("../src/outbox.js");
+    const records: any[] = [];
+    for (let n = 0; n < 250; n++) records.push(makeRecord({ sessionName: "sess-big", content: `m${n}` }));
+    mod.enqueueOutbox(records);
+    const honcho = createMockHoncho();
+    const logs: string[] = [];
+    await mod.drainOutbox(honcho, "instance-1", (m) => logs.push(m));
+    const calls = honcho.calls["session.addMessages"];
+    expect(calls.length).toBe(3); // 250 -> 100 + 100 + 50
+    for (const c of calls) expect(c[1].length).toBeLessThanOrEqual(100);
+    expect(calls.reduce((t: number, c: any[]) => t + c[1].length, 0)).toBe(250);
+    expect(logs.some((l) => l.includes("flushed 250"))).toBe(true);
+  });
+
+  it("on a mid-group failure, requeues only the unsent tail (no duplicate re-sends)", async () => {
+    const mod = await import("../src/outbox.js");
+    const records: any[] = [];
+    for (let n = 0; n < 250; n++) records.push(makeRecord({ sessionName: "sess-big", content: `m${n}` }));
+    mod.enqueueOutbox(records);
+    // Accept the first batch, fail the second.
+    let addCalls = 0;
+    const honcho: any = {
+      calls: {},
+      session: async () => ({
+        addMessages: async () => {
+          addCalls += 1;
+          if (addCalls >= 2) throw new Error("host down mid-drain");
+        },
+      }),
+      peer: async (name: string) => ({ message: (content: string, opts?: any) => ({ name, content, opts }) }),
+    };
+    await mod.drainOutbox(honcho, "instance-1", () => {});
+    const requeued = readOutbox();
+    expect(requeued.length).toBe(150); // first 100 landed; only 150 remain
+    expect(requeued[0].content).toBe("m100"); // the sent 100 are NOT requeued
+    expect(requeued[requeued.length - 1].content).toBe("m249");
+  });
+});
+
+describe("drainOutbox time-budget abort (#57 review follow-up)", () => {
+  it("stops sending remaining chunks once the budget elapses (no background duplicate sends)", async () => {
+    const mod = await import("../src/outbox.js");
+    const records: any[] = [];
+    for (let n = 0; n < 250; n++) records.push(makeRecord({ sessionName: "sess-slow", content: `m${n}` }));
+    mod.enqueueOutbox(records);
+    let addCalls = 0;
+    const honcho: any = {
+      calls: {},
+      session: async () => ({
+        addMessages: async () => {
+          addCalls += 1;
+          await new Promise((r) => setTimeout(r, 150)); // each batch is slow
+        },
+      }),
+      peer: async (name: string) => ({ message: (content: string, opts?: any) => ({ name, content, opts }) }),
+    };
+    // Budget expires during the first batch.
+    await mod.drainOutbox(honcho, "instance-1", () => {}, { timeBudgetMs: 5 });
+    // Let any still-running background work settle before asserting.
+    await new Promise((r) => setTimeout(r, 700));
+    // Only the in-flight first batch may land; the deadline guard must stop the
+    // loop firing the remaining two batches in the background (which would be
+    // requeued as unsent → duplicates). Without the guard this is 3.
+    expect(addCalls).toBeLessThanOrEqual(1);
+  });
+});
