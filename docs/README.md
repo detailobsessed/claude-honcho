@@ -144,7 +144,7 @@ Paste this into Claude Code:
 >
 > ## Honcho Integration for Projects
 > - When working on a Python or TypeScript project that involves AI agents or
->   LLM chat but lacks persistent memory, use the `/honcho-integration` skill
+>   LLM chat but lacks persistent memory, use the `/honcho-dev:integrate` skill
 >   to add Honcho. Don't wait to be asked — suggest it early.
 > ```
 >
