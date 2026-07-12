@@ -33,7 +33,12 @@ const SKIP_CONTEXT_PATTERNS = [
 const FETCH_TIMEOUT_MS = 4000;
 // Cap the prompt upload so a slow/unreachable host can't consume the hook's
 // budget and starve the context fetch (FETCH_TIMEOUT_MS) the user waits on.
+// Overridable via HONCHO_UPLOAD_TIMEOUT_MS for slow networks (and tests).
 const UPLOAD_TIMEOUT_MS = 3000;
+
+function uploadTimeoutMs(): number {
+  return Number(process.env.HONCHO_UPLOAD_TIMEOUT_MS) || UPLOAD_TIMEOUT_MS;
+}
 
 /**
  * Extract meaningful topics from a prompt for semantic search.
@@ -152,11 +157,11 @@ export async function handleUserPrompt(): Promise<void> {
       const outcome = await Promise.race([
         uploadPromise.then(() => "sent" as const),
         new Promise<"timeout">((resolve) => {
-          uploadTimer = setTimeout(() => resolve("timeout"), UPLOAD_TIMEOUT_MS);
+          uploadTimer = setTimeout(() => resolve("timeout"), uploadTimeoutMs());
         }),
       ]);
       if (outcome === "timeout") {
-        logHook("user-prompt", "Upload still in flight after 3s — left running to avoid a duplicate");
+        logHook("user-prompt", "Upload still in flight — left running to avoid a duplicate");
         // The send may still reject later; swallow it so it can't surface as an
         // unhandled rejection now that the race has moved on.
         uploadPromise.catch(() => {});
