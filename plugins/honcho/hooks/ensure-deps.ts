@@ -23,10 +23,25 @@ export interface RunResult {
 }
 export type Runner = (cmd: string, args: string[], cwd: string) => RunResult;
 
-const defaultRun: Runner = (cmd, args, cwd) => {
+// Cap the install so a stalled `bun install` can't wedge SessionStart. Claude
+// Code's hook timeout also bounds this hook, but this internal cap fires first
+// with a clean failure (and still applies when the script is run outside a
+// hook). Kept under the hook's 60s budget; overridable via HONCHO_INSTALL_TIMEOUT_MS.
+const DEFAULT_INSTALL_TIMEOUT_MS = 50_000;
+
+export const defaultRun: Runner = (cmd, args, cwd) => {
   // Discard install chatter (SessionStart stdout can be read as context);
   // surface only failures on stderr.
-  const r = spawnSync(cmd, args, { cwd, stdio: ["ignore", "ignore", "inherit"] });
+  const r = spawnSync(cmd, args, {
+    cwd,
+    stdio: ["ignore", "ignore", "inherit"],
+    timeout: Number(process.env.HONCHO_INSTALL_TIMEOUT_MS) || DEFAULT_INSTALL_TIMEOUT_MS,
+    // SIGKILL, not SIGTERM: spawnSync blocks until the child exits and does not
+    // escalate, so a child that catches or ignores SIGTERM would keep the hook
+    // wedged past the deadline — the exact hang this cap prevents. SIGKILL can't
+    // be trapped, guaranteeing the timeout is enforced.
+    killSignal: "SIGKILL",
+  });
   return { status: r.status, error: r.error };
 };
 
