@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { SHARED_HONCHO_DIR, clearSharedHonchoDir } from "./setup";
 import { createMockHoncho, writeHonchoConfig } from "./helpers";
-import { setHoncho, stubExit, runHook, createFailingHoncho, clearHonchoEnv } from "./hook-harness";
+import { setHoncho, stubExit, runHook, createFailingHoncho, createHangingHoncho, clearHonchoEnv } from "./hook-harness";
 import { cacheStdin, setDetectedHost } from "../src/config";
 import { setCachedUserContext } from "../src/cache";
 
@@ -162,5 +162,21 @@ describe("user-prompt hook", () => {
     expect(queued[0].content).toBe("remember I prefer dark mode");
     expect(queued[0].peerName).toBe("tester");
     expect(queued[0].metadata.session_affinity).toBeDefined();
+  });
+
+  test("does NOT queue when the upload times out (avoids a duplicate on drain)", async () => {
+    // A timeout is not a confirmed failure: the send may still land server-side,
+    // so queuing it would replay a duplicate at the next SessionStart. Only a
+    // hard rejection (see the test above) should reach the outbox.
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    setHoncho(createHangingHoncho());
+    process.env.HONCHO_UPLOAD_TIMEOUT_MS = "20"; // race the hang deterministically
+    cacheStdin(
+      JSON.stringify({ session_id: "s5", cwd: "/tmp/proj", prompt: "remember I prefer dark mode" }),
+    );
+
+    expect(await runHook(handleUserPrompt)).toBe(0);
+
+    expect(readOutbox()).toHaveLength(0);
   });
 });

@@ -47,6 +47,7 @@ const HONCHO_ENV_VARS = [
   "HONCHO_ENABLED",
   "HONCHO_SAVE_MESSAGES",
   "HONCHO_LOGGING",
+  "HONCHO_UPLOAD_TIMEOUT_MS",
   "CURSOR_PROJECT_DIR",
 ];
 
@@ -120,4 +121,21 @@ export function createFailingHoncho(message = "host unreachable"): any {
       };
     },
   };
+}
+
+/**
+ * A Honcho double whose message upload never settles, to exercise the
+ * upload-timeout path. Everything else fails fast (like createFailingHoncho)
+ * so context retrieval doesn't hang after the timeout fires.
+ */
+export function createHangingHoncho(message = "host unreachable"): any {
+  const base = createFailingHoncho(message);
+  const origSession = base.session;
+  base.session = async (name: string) => {
+    const session = await origSession(name);
+    // Never resolves — the hook must time out and move on without queuing.
+    session.addMessages = () => new Promise<never>(() => {});
+    return session;
+  };
+  return base;
 }
