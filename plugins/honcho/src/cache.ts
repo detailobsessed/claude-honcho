@@ -123,6 +123,7 @@ interface ContextCache {
   summaries?: { data: any; fetchedAt: number };
   messageCount?: number; // Track messages since last refresh
   lastRefreshMessageCount?: number; // Message count at last knowledge graph refresh
+  injectedConclusions?: Record<string, string[]>; // instanceId -> already-injected cleaned conclusion strings
 }
 
 // These are now configurable via config.json, with defaults in getContextRefreshConfig()
@@ -138,7 +139,7 @@ function getMessageRefreshThreshold(): number {
 
 // Known keys in ContextCache — anything else is a ghost from older versions
 const CONTEXT_CACHE_KNOWN_KEYS = new Set([
-  "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount",
+  "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount", "injectedConclusions",
 ]);
 
 export function loadContextCache(): ContextCache {
@@ -242,6 +243,44 @@ export function resetMessageCount(): void {
   const cache = loadContextCache();
   cache.messageCount = 0;
   cache.lastRefreshMessageCount = 0;
+  saveContextCache(cache);
+}
+
+// ============================================
+// Injected Conclusions - per-session dedup for UserPromptSubmit (#39)
+// ============================================
+
+const MAX_INJECTED_PER_SESSION = 200;
+const MAX_TRACKED_SESSIONS = 20;
+
+/** Return the cleaned conclusion strings already injected into this instance's session. */
+export function getInjectedConclusions(instanceId: string): string[] {
+  if (!instanceId) return [];
+  const cache = loadContextCache();
+  return cache.injectedConclusions?.[instanceId] ?? [];
+}
+
+/** Record newly-injected conclusion strings for this instance's session, deduplicated and capped. */
+export function addInjectedConclusions(instanceId: string, lines: string[]): void {
+  if (!instanceId || lines.length === 0) return;
+
+  const cache = loadContextCache();
+  if (!cache.injectedConclusions) cache.injectedConclusions = {};
+
+  const existing = cache.injectedConclusions[instanceId] ?? [];
+  const merged = [...existing];
+  for (const line of lines) {
+    if (!merged.includes(line)) merged.push(line);
+  }
+  cache.injectedConclusions[instanceId] = merged.slice(-MAX_INJECTED_PER_SESSION);
+
+  // Evict oldest-inserted sessions once we exceed the tracked-session cap.
+  const keys = Object.keys(cache.injectedConclusions);
+  if (keys.length > MAX_TRACKED_SESSIONS) {
+    const toEvict = keys.slice(0, keys.length - MAX_TRACKED_SESSIONS);
+    for (const key of toEvict) delete cache.injectedConclusions[key];
+  }
+
   saveContextCache(cache);
 }
 

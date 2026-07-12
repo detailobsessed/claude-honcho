@@ -19,8 +19,13 @@ import { cacheStdin, setDetectedHost } from "../src/config";
 import { setCachedUserContext } from "../src/cache";
 
 let handleUserPrompt: () => Promise<void>;
+let formatCachedContext: (context: any, peerName: string, seen?: string[]) => {
+  parts: string[];
+  conclusionCount: number;
+  newConclusions: string[];
+};
 beforeAll(async () => {
-  ({ handleUserPrompt } = await import("../src/hooks/user-prompt.ts"));
+  ({ handleUserPrompt, formatCachedContext } = await import("../src/hooks/user-prompt.ts") as any);
 });
 
 function baseConfig(extra: Record<string, unknown> = {}) {
@@ -178,5 +183,28 @@ describe("user-prompt hook", () => {
     expect(await runHook(handleUserPrompt)).toBe(0);
 
     expect(readOutbox()).toHaveLength(0);
+  });
+});
+
+describe("formatCachedContext dedup (#39: don't re-inject the same conclusions every turn)", () => {
+  const context = {
+    representation: "[x] likes TypeScript\n[y] uses Bun\n[z] debugs auth",
+  };
+
+  test("first turn (empty seen set) surfaces all conclusions", () => {
+    const result = formatCachedContext(context, "user", []);
+    expect(result.parts.some((p) => p.startsWith("Relevant conclusions:"))).toBe(true);
+    const conclusionsPart = result.parts.find((p) => p.startsWith("Relevant conclusions:"))!;
+    expect(conclusionsPart).toContain("likes TypeScript");
+    expect(conclusionsPart).toContain("uses Bun");
+    expect(conclusionsPart).toContain("debugs auth");
+    expect(result.newConclusions).toEqual(["likes TypeScript", "uses Bun", "debugs auth"]);
+  });
+
+  test("second turn with the same conclusions already seen yields no re-injection", () => {
+    const seen = ["likes TypeScript", "uses Bun", "debugs auth"];
+    const result = formatCachedContext(context, "user", seen);
+    expect(result.parts.some((p) => p.startsWith("Relevant conclusions:"))).toBe(false);
+    expect(result.newConclusions).toEqual([]);
   });
 });
