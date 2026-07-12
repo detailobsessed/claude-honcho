@@ -715,12 +715,17 @@ export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
   return getHonchoBaseUrlForEndpoint(config.endpoint);
 }
 
+// Default SDK request timeout. Overridable via HONCHO_SDK_TIMEOUT_MS: the
+// deriver's dialectic queries at high/max reasoning levels can exceed 8s, so
+// users on those levels need to raise it (issue #25).
+const DEFAULT_SDK_TIMEOUT_MS = 8000;
+
 export function getHonchoClientOptions(config: HonchoCLAUDEConfig): HonchoClientOptions {
   return {
     apiKey: config.apiKey,
     baseURL: getHonchoBaseUrl(config),
     workspaceId: config.workspace,
-    timeout: 8000,
+    timeout: Number(process.env.HONCHO_SDK_TIMEOUT_MS) || DEFAULT_SDK_TIMEOUT_MS,
     maxRetries: 1,
   };
 }
