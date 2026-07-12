@@ -12,11 +12,12 @@ First release of the fork, forked from upstream v0.2.7.
 
 ### Fork infrastructure
 
-- 87-test Bun suite covering the cache, config, git, and outbox modules.
+- Bun test suite covering the cache, config, git, outbox, and lifecycle-hook logic.
 - Local quality gates via [prek](https://prek.j178.dev) in place of CI: whitespace/config builtins, `betterleaks` secret scanning, `typos`, `shellcheck`, and Biome lint, plus `typecheck` and `bun test` on every commit.
 - Biome lint enforced as errors, with all 21 pre-existing findings cleared.
 - Versioning reset to `0.0.1` with each plugin's `plugin.json` as the single source of truth; per-plugin version fields removed from `marketplace.json`, and marketplace ownership set to the fork maintainer.
-- Full setup manual moved to `docs/README.md`; the root README now explains why the fork exists.
+- Replaced the vendored `node_modules` with a `SessionStart` bootstrap that installs dependencies on first run (the documented Claude Code pattern), keeping the repository lean.
+- The root README explains the fork and carries the essential install; the full configuration manual is left to the linked upstream README rather than vendoring a copy that would drift out of date.
 
 The following entries carried over from upstream's unreleased work at the time of the fork:
 
