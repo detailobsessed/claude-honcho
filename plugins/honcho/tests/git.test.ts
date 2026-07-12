@@ -3,7 +3,7 @@
  *
  * Uses real temporary git repos to test the actual git command output parsing.
  */
-import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+import { describe, expect, it, afterEach } from "bun:test";
 import { makeTempDir, cleanupDir, makeFakeGitRepo, gitIn } from "./helpers";
 import { writeFileSync } from "fs";
 import { join } from "path";

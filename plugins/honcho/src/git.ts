@@ -119,7 +119,7 @@ export function formatGitContext(state: GitState, recentCommits?: string[]): str
 
   if (recentCommits && recentCommits.length > 0) {
     parts.push(`Recent commits:`);
-    recentCommits.slice(0, 3).forEach((c) => parts.push(`  ${c}`));
+    recentCommits.slice(0, 3).forEach((c) => { parts.push(`  ${c}`); });
   }
 
   return parts.join("\n");

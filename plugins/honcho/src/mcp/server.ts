@@ -5,7 +5,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Honcho } from "@honcho-ai/sdk";
-import { existsSync, readFileSync } from "fs";
+import { readFileSync } from "fs";
 import {
   loadConfig,
   saveConfig,
@@ -18,7 +18,6 @@ import {
   getEndpointInfo,
   getKnownHosts,
   setDetectedHost,
-  type HonchoCLAUDEConfig,
   type SessionStrategy,
   type ReasoningLevel,
   type HonchoEnvironment,

@@ -197,7 +197,7 @@ export function logAsync(operation: string, message: string, results?: { name: s
 /**
  * Start a timed operation - returns a function to call when done
  */
-export function startTimed(source: string, operation: string): (success?: boolean, details?: string) => void {
+export function startTimed(_source: string, operation: string): (success?: boolean, details?: string) => void {
   const start = Date.now();
   return (success = true, details?: string) => {
     const timing = Date.now() - start;

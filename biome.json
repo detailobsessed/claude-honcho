@@ -2,7 +2,7 @@
   "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": ["plugins/honcho/**/*.ts", "!plugins/honcho/node_modules/**"]
+    "includes": ["plugins/honcho/**/*.ts"]
   },
   "formatter": { "enabled": false },
   "assist": { "enabled": false },
@@ -13,7 +13,8 @@
       "suspicious": {
         "noExplicitAny": "off",
         "noControlCharactersInRegex": "off",
-        "useIterableCallbackReturn": "warn"
+        "noPrototypeBuiltins": "error",
+        "useIterableCallbackReturn": "error"
       },
       "style": {
         "useNodejsImportProtocol": "off",
@@ -22,7 +23,15 @@
       },
       "complexity": {
         "useOptionalChain": "off",
-        "useLiteralKeys": "off"
+        "useLiteralKeys": "off",
+        "noUselessSwitchCase": "error",
+        "noUselessEscapeInRegex": "error",
+        "noUselessContinue": "error"
+      },
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "noUnusedFunctionParameters": "error"
       }
     }
   }
