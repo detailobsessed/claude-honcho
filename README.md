@@ -28,15 +28,20 @@ You'll need [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`) a
    export HONCHO_API_KEY="hch-..."
    ```
 
-2. **Install in Claude Code:**
+2. **Install the plugin in Claude Code:**
 
    ```
    /plugin marketplace add detailobsessed/claude-honcho
    /plugin install honcho@honcho
-   /plugin install honcho-dev@honcho   # optional — skills for building on the Honcho SDK
    ```
 
-3. **Restart Claude Code.** You should see the Honcho pixel art and memory loading on startup.
+   That one install brings everything memory needs — the MCP server, the session hooks, and the `/honcho:*` skills. Nothing is gated behind a later step.
+
+   > `honcho-dev` is a **separate, optional** plugin — skills for building your *own* apps on the Honcho SDK. It has nothing to do with memory. Install it with `/plugin install honcho-dev@honcho` only if you want those.
+
+3. **Restart Claude Code.** Memory loads silently in the background on each session start — there is no startup banner or pixel art. Confirm it's live with `/honcho:status`, or by tailing `~/.honcho/activity.log`.
+
+4. **Run `/honcho:setup` (recommended).** Memory already works off the `HONCHO_API_KEY` environment variable alone, but `setup` makes it solid: it validates the key against the API, writes `~/.honcho/config.json` so configuration no longer depends on the env var reaching every subprocess, and installs the memory statusLine. (If you already run a custom statusLine, setup leaves it untouched and just prints how to switch.)
 
 This covers the essentials. For the complete walkthrough — Windows setup, optional environment variables (`HONCHO_PEER_NAME`, `HONCHO_WORKSPACE`), the intro interview (`/honcho:interview`), the `~/.claude/CLAUDE.md` directives, the full configuration reference, and troubleshooting — see the **[upstream README](https://github.com/plastic-labs/claude-honcho#readme)**. It predates this fork, so **install via `detailobsessed/claude-honcho` as shown above**, not the `plastic-labs` marketplace it references.
 
