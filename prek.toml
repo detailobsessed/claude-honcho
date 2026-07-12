@@ -1,36 +1,62 @@
 # Configuration for prek (https://prek.j178.dev), a fast pre-commit alternative.
-# All hooks here are prek's Rust-native builtins: no cloned repos, no runtime
-# to install, they run offline. List them with `prek util list-builtins`.
+# Quality gates run locally here (this project has no CI): builtins are prek's
+# Rust-native hooks (`prek util list-builtins`), remote repos are pinned by
+# `prek update`, and the `local` block runs this repo's own bun tooling.
 #:schema https://www.schemastore.org/prek.json
 
 # Generated lockfile: we never hand-edit it, so keep the fixers off it.
 exclude = 'plugins/honcho/bun\.lock'
 
+# --- Rust-native builtins: whitespace, git safety, config validation ---------
 [[repos]]
 repo = "builtin"
 hooks = [
-    # Whitespace / newline hygiene
     { id = "trailing-whitespace" },
     { id = "end-of-file-fixer" },
     { id = "mixed-line-ending", args = ["--fix=lf"] },
     { id = "fix-byte-order-marker" },
-
-    # Git safety
     { id = "check-merge-conflict" },
     { id = "check-case-conflict" },
     { id = "check-illegal-windows-names" },
     { id = "check-symlinks" },
     { id = "destroyed-symlinks" },
     { id = "check-added-large-files", args = ["--maxkb=2048"] },
-
-    # Security: the plugin handles Honcho API keys, so guard against leaks.
     { id = "detect-private-key" },
-
-    # Executables must declare an interpreter.
     { id = "check-executables-have-shebangs" },
-
-    # Structured-config validators (tsconfig.json is JSONC, so it's excluded).
     { id = "check-json", exclude = 'plugins/honcho/tsconfig\.json' },
     { id = "check-yaml" },
     { id = "check-toml" },
+]
+
+# --- Secret scanning: betterleaks (by the original Gitleaks author) -----------
+[[repos]]
+repo = "https://github.com/betterleaks/betterleaks"
+rev = "v1.6.1"
+hooks = [{ id = "betterleaks" }]
+
+# --- Spelling across code and docs -------------------------------------------
+[[repos]]
+repo = "https://github.com/crate-ci/typos"
+rev = "v1.48.0"
+# Report-only (drop the hook's default --write-changes) so fixes stay deliberate.
+hooks = [{ id = "typos", args = ["--force-exclude"] }]
+
+# --- Shell static analysis for the install / statusline / version scripts ----
+[[repos]]
+repo = "https://github.com/shellcheck-py/shellcheck-py"
+rev = "v0.11.0.1"
+hooks = [{ id = "shellcheck" }]
+
+# --- TypeScript lint (report-only: biome-ci never writes; formatter off) ------
+[[repos]]
+repo = "https://github.com/biomejs/pre-commit"
+rev = "v2.5.3"
+hooks = [{ id = "biome-ci" }]
+
+# --- Project quality gates, run locally in place of CI ------------------------
+[[repos]]
+repo = "local"
+hooks = [
+    { id = "typecheck", name = "tsc typecheck", entry = "bash -c 'cd plugins/honcho && bun run typecheck'", language = "system", pass_filenames = false, files = '\.ts$' },
+    { id = "bun-test", name = "bun test", entry = "bash -c 'cd plugins/honcho && bun test'", language = "system", pass_filenames = false, files = '\.ts$' },
 ]
