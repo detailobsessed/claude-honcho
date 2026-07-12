@@ -232,33 +232,51 @@ export async function drainOutbox(
   let sent = 0;
   let i = 0;
   for (; i < groups.length; i++) {
-    if (Date.now() > deadline) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
       break;
     }
     const [sessionName, group] = groups[i];
+    let budgetTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const session = await honcho.session(sessionName);
-      const peerCache = new Map<string, any>();
-      const messages: any[] = [];
-      for (const r of group) {
-        let peer = peerCache.get(r.peerName);
-        if (!peer) {
-          peer = await honcho.peer(r.peerName);
-          peerCache.set(r.peerName, peer);
-        }
-        messages.push(
-          peer.message(r.content, {
-            createdAt: r.createdAt,
-            metadata: r.metadata,
-          }),
-        );
-      }
-      await session.addMessages(messages);
+      // Bound the whole round trip by the remaining budget. The deadline used
+      // to gate only the START of a group, so a single hung session/peer/
+      // addMessages await could block SessionStart well past timeBudgetMs.
+      await Promise.race([
+        (async () => {
+          const session = await honcho.session(sessionName);
+          const peerCache = new Map<string, any>();
+          const messages: any[] = [];
+          for (const r of group) {
+            let peer = peerCache.get(r.peerName);
+            if (!peer) {
+              peer = await honcho.peer(r.peerName);
+              peerCache.set(r.peerName, peer);
+            }
+            messages.push(
+              peer.message(r.content, {
+                createdAt: r.createdAt,
+                metadata: r.metadata,
+              }),
+            );
+          }
+          await session.addMessages(messages);
+        })(),
+        new Promise<never>((_, reject) => {
+          budgetTimer = setTimeout(
+            () => reject(new Error(`time budget (${timeBudgetMs}ms) exhausted`)),
+            remaining,
+          );
+        }),
+      ]);
       sent += group.length;
     } catch (e) {
-      // Host went away again mid-drain — requeue and stop trying this pass.
+      // Host went away again mid-drain, or the budget ran out — requeue the
+      // remainder (this group included) and stop this pass.
       log(`outbox: drain interrupted (${e})`);
       break;
+    } finally {
+      clearTimeout(budgetTimer);
     }
   }
   // Everything from the break point onward (failed or untried) is requeued.
