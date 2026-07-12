@@ -36,8 +36,10 @@ export function cleanupDir(dir: string): void {
 export function makeFakeGitRepo(): string {
   const dir = makeTempDir();
   const { execSync } = require("child_process");
+  // env: process.env so the preload's GIT_* scrub reaches git (see setup.ts) —
+  // under Bun, child_process ignores runtime process.env changes without it.
   const git = (args: string) =>
-    execSync(`git ${args}`, { cwd: dir, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+    execSync(`git ${args}`, { cwd: dir, env: process.env, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
   git("init -b main");
   git('config user.email "test@test.com"');
   git('config user.name "Test"');
@@ -51,7 +53,7 @@ export function makeFakeGitRepo(): string {
 /** Run a git command in a directory and return trimmed output. */
 export function gitIn(dir: string, args: string): string {
   const { execSync } = require("child_process");
-  return execSync(`git ${args}`, { cwd: dir, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+  return execSync(`git ${args}`, { cwd: dir, env: process.env, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
 }
 
 /** Write a config.json to a .honcho directory. */

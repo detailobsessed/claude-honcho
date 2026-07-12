@@ -13,6 +13,17 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { mock } from "bun:test";
 
+// Isolate git-shelling tests from the ambient git environment. When the suite
+// runs inside a git hook (e.g. the pre-commit test gate), git exports GIT_DIR,
+// GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, etc. into the hook's environment.
+// Any `git` a test spawns would inherit those and operate on the REAL repo
+// regardless of its `cwd` — so makeFakeGitRepo()'s `git init` never creates the
+// temp .git and every git assertion fails. Strip all GIT_* vars up front so
+// each test's git respects only the cwd it was given.
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith("GIT_")) delete process.env[key];
+}
+
 // Create a single temp home directory for all tests
 const tempHome = mkdtempSync(join(tmpdir(), "honcho-test-shared-"));
 

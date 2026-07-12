@@ -22,7 +22,16 @@ export function isGitRepo(cwd: string): boolean {
  */
 function gitCommand(cwd: string, args: string): string | null {
   try {
-    return execSync(`git ${args}`, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+    // Pass the live process.env explicitly. Under Bun, child_process uses the
+    // environment snapshot taken at startup unless `env` is given, so runtime
+    // changes to process.env (e.g. tests stripping inherited GIT_DIR/GIT_WORK_TREE
+    // so `cwd` is honored) would not otherwise reach git. No-op in production.
+    return execSync(`git ${args}`, {
+      cwd,
+      env: process.env,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
   } catch {
     return null;
   }
