@@ -9,10 +9,10 @@ A community-maintained fork of [`plastic-labs/claude-honcho`](https://github.com
 
 ## Why this fork exists
 
-Upstream has sat untouched for 6+ weeks while bug reports went unanswered. Rather than wait, this fork:
+When this fork began, upstream had sat untouched for weeks — bug reports unanswered and no releases shipping. Rather than wait, this fork:
 
 - **folds in community bug fixes** — including work by [@saralilyb](https://github.com/saralilyb)
-- **adds a real test suite** — 87 tests covering the cache, config, git, and outbox logic
+- **adds a real test suite** covering the cache, config, git, outbox, and hook logic
 - **adds local quality gates** via [prek](https://prek.j178.dev): lint, typecheck, tests, secret scanning, spell-check, and shellcheck, run on every commit — no CI required
 - **restarts versioning at `0.0.1`** to make clear this is a distinct, separately-maintained artifact
 
@@ -20,13 +20,25 @@ It's maintained for as long as I rely on it. If upstream revives the project, th
 
 ## Install
 
-```
-/plugin marketplace add detailobsessed/claude-honcho
-/plugin install honcho@honcho
-/plugin install honcho-dev@honcho   # optional — skills for building on the Honcho SDK
-```
+You'll need [Bun](https://bun.sh) (`curl -fsSL https://bun.sh/install | bash`) and a Honcho API key from [app.honcho.dev](https://app.honcho.dev).
 
-Requires [Bun](https://bun.sh) and a Honcho API key from [app.honcho.dev](https://app.honcho.dev). Restart Claude Code after installing.
+1. **Export your API key** so the plugin can read it — add it to your shell config (`~/.zshrc` / `~/.bashrc`; on Windows, set a User environment variable):
+
+   ```bash
+   export HONCHO_API_KEY="hch-..."
+   ```
+
+2. **Install in Claude Code:**
+
+   ```
+   /plugin marketplace add detailobsessed/claude-honcho
+   /plugin install honcho@honcho
+   /plugin install honcho-dev@honcho   # optional — skills for building on the Honcho SDK
+   ```
+
+3. **Restart Claude Code.** You should see the Honcho pixel art and memory loading on startup.
+
+This covers the essentials. The full walkthrough — Windows setup, optional environment variables, the intro interview (`/honcho:interview`), and the `~/.claude/CLAUDE.md` directives that tell Claude how to actually use its memory — is in **[docs/README.md](docs/README.md)**.
 
 ## What it does
 
