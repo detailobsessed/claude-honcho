@@ -24,6 +24,20 @@ mock.module("os", () => {
   return { ...actual, homedir: () => tempHome };
 });
 
+// Guard: fail loud if the mock didn't take. We import a source module the same
+// way the test files do (dynamic import, AFTER the mock is registered) and check
+// the ~/.honcho path it resolved at load time. If it isn't under our temp dir,
+// the tests would silently write into the real home directory — a red suite is
+// far better than a polluted $HOME.
+const { getConfigDir } = await import("../src/config");
+const resolvedConfigDir = getConfigDir();
+if (!resolvedConfigDir.startsWith(tempHome)) {
+  throw new Error(
+    `[honcho tests] homedir() mock did not take: config dir resolved to ${resolvedConfigDir}, ` +
+      `expected a path under ${tempHome}. Tests would write into the real home directory — aborting.`,
+  );
+}
+
 // Export the shared paths so test files can use them
 export const SHARED_HOME = tempHome;
 export const SHARED_HONCHO_DIR = join(tempHome, ".honcho");
