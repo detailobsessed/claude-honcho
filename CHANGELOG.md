@@ -1,8 +1,24 @@
 # Changelog
 
-All notable changes to claude-honcho will be documented in this file.
+All notable changes to this community-maintained fork of claude-honcho are documented here.
+
+This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/claude-honcho) at its v0.2.7 release and restarts versioning at `0.0.1`. Entries at `[0.2.4]` and below predate the fork and reflect upstream's history.
 
 ## [Unreleased]
+
+## [0.0.1] - 2026-07-12
+
+First release of the fork, forked from upstream v0.2.7.
+
+### Fork infrastructure
+
+- 87-test Bun suite covering the cache, config, git, and outbox modules.
+- Local quality gates via [prek](https://prek.j178.dev) in place of CI: whitespace/config builtins, `betterleaks` secret scanning, `typos`, `shellcheck`, and Biome lint, plus `typecheck` and `bun test` on every commit.
+- Biome lint enforced as errors, with all 21 pre-existing findings cleared.
+- Versioning reset to `0.0.1` with each plugin's `plugin.json` as the single source of truth; per-plugin version fields removed from `marketplace.json`, and marketplace ownership set to the fork maintainer.
+- Full setup manual moved to `docs/README.md`; the root README now explains why the fork exists.
+
+The following entries carried over from upstream's unreleased work at the time of the fork:
 
 ### Added
 
