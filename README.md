@@ -52,6 +52,28 @@ This covers the essentials. For the complete walkthrough — Windows setup, opti
 
 Gives Claude Code long-term memory that survives context wipes, restarts, and `ctrl+c` — your preferences, your projects, and what Claude was doing, across everything you work on.
 
+## Developing this fork
+
+The installed plugin runs from a **copy** in `~/.claude/plugins/cache/honcho/honcho/<version>/`, pinned to a released commit on `main`. Editing your local checkout does nothing to it — so to try a change before merging and releasing, you need to run the plugin *from your working tree*.
+
+There's no build step to worry about: the hooks and MCP server are TypeScript run directly (`bun run ${CLAUDE_PLUGIN_ROOT}/…ts`), so a live edit takes effect the moment the plugin reloads.
+
+**Dogfood a branch with `--plugin-dir`:**
+
+```bash
+cd /path/to/claude-honcho          # your checkout, on the feature branch
+claude --plugin-dir ./plugins/honcho
+```
+
+`--plugin-dir` loads the plugin straight from that directory — no install, no marketplace — and takes precedence over the installed version. Point it at `./plugins/honcho` (the dir with `.claude-plugin/plugin.json`), not the repo root. Iterate without restarting: edit a file under `src/`, run `/reload-plugins`, test.
+
+> [!IMPORTANT]
+> **Disable the installed `honcho` plugin while dogfooding.** `--plugin-dir` wins for *tool resolution*, but hooks are additive — leave the released copy enabled and both fire, so every session writes to Honcho **twice** and registers the MCP server twice. Open `/plugin` → **honcho** → disable for the session (re-enable when done). As a bonus this gives you a clean A/B against the released behavior.
+
+Only once a change is confirmed live should it be committed, merged to `main`, and released into the marketplace copy — never released blind.
+
+> `honcho-dev` is **not** a development mode for this plugin — it's a separate plugin of SDK-authoring skills for building *other* apps on Honcho (see the install note above). The one time it's relevant here is if a future `@honcho-ai/sdk` major bump needs migrating; otherwise it plays no part in developing the fork.
+
 ## Credit & license
 
 Built on [Honcho](https://honcho.dev) by [Plastic Labs](https://plasticlabs.ai). The original work is © Plastic Labs and MIT-licensed — see [LICENSE](LICENSE). This fork is maintained by [Ismar](https://github.com/ichoosetoaccept) and remains MIT.
