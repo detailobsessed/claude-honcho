@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, readsAsUnified, writesAsDirectional, applyDirectoryOverride, resolveIsolationAction, isolateDirectory } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, readsAsUnified, writesAsDirectional, applyDirectoryOverride, resolveIsolationAction, isolateDirectory, resolveCacheScope } from "../config.js";
 import {
   setCachedUserContext,
   setCachedSessionId,
@@ -255,7 +255,7 @@ export async function handleSessionStart(): Promise<void> {
     // Cache results for user-prompt hook
     if (userContextResult.status === "fulfilled" && userContextResult.value) {
       const context = userContextResult.value as any;
-      setCachedUserContext(config.workspace, context);
+      setCachedUserContext(config.workspace, context, resolveCacheScope(config));
       const rep = context.representation;
       const count = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
       logCache("write", "userContext", `${count} conclusions`);

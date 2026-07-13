@@ -1,6 +1,7 @@
 import { homedir } from "os";
 import { join, basename } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
 
@@ -804,6 +805,19 @@ export function getHonchoBaseUrl(config: HonchoCLAUDEConfig): string {
   return getHonchoBaseUrlForEndpoint(config.endpoint);
 }
 
+/**
+ * Stable, non-secret cache-scope id for a resolved config: distinguishes the
+ * Honcho backend + account so two directories that share a workspace NAME but
+ * point at different endpoints/accounts don't share a context-cache slot.
+ */
+export function resolveCacheScope(config: HonchoCLAUDEConfig): string {
+  const url = getHonchoBaseUrl(config);
+  const account = config.apiKey
+    ? createHash("sha256").update(config.apiKey).digest("hex").slice(0, 12)
+    : "noauth";
+  return `${url}|${account}`;
+}
+
 // Default SDK request timeout. Overridable via HONCHO_SDK_TIMEOUT_MS: the
 // deriver's dialectic queries at high/max reasoning levels can exceed 8s, so
 // users on those levels need to raise it (issue #25).
@@ -977,7 +991,7 @@ function updateRawConfigFile(mutate: (raw: HonchoFileConfig) => void): void {
  */
 export function deriveWorkspaceName(cwd: string, taken?: Set<string>): string {
   if (!cwd) return "";
-  const segments = cwd.replace(/\/+$/, "").split("/").filter(Boolean);
+  const segments = cwd.replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean);
   if (segments.length === 0) return "";
   let i = segments.length - 1;
   let name = segments[i];

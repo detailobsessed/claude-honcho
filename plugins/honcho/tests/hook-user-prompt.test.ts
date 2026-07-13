@@ -15,7 +15,7 @@ import { join } from "path";
 import { SHARED_HONCHO_DIR, clearSharedHonchoDir } from "./setup";
 import { createMockHoncho, writeHonchoConfig } from "./helpers";
 import { setHoncho, stubExit, runHook, createFailingHoncho, createHangingHoncho, clearHonchoEnv } from "./hook-harness";
-import { cacheStdin, setDetectedHost } from "../src/config";
+import { cacheStdin, setDetectedHost, resolveCacheScope } from "../src/config";
 import { setCachedUserContext } from "../src/cache";
 
 let handleUserPrompt: () => Promise<void>;
@@ -100,11 +100,16 @@ describe("user-prompt hook", () => {
   });
 
   test("skips the upload when saveMessages is false but still serves fresh cached context", async () => {
-    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig({ saveMessages: false }));
-    setCachedUserContext("test-ws", {
-      representation: "- likes TypeScript\n- works on the honcho plugin",
-      peerCard: ["Senior engineer"],
-    });
+    const config = baseConfig({ saveMessages: false });
+    writeHonchoConfig(SHARED_HONCHO_DIR, config);
+    setCachedUserContext(
+      "test-ws",
+      {
+        representation: "- likes TypeScript\n- works on the honcho plugin",
+        peerCard: ["Senior engineer"],
+      },
+      resolveCacheScope(config as any),
+    );
     const logSpy = spyOn(console, "log");
     cacheStdin(
       JSON.stringify({ session_id: "s2", cwd: "/tmp/proj", prompt: "what do you know about my setup" }),

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, beforeEach } from "bun:test";
 import { clearSharedHonchoDir, SHARED_HONCHO_DIR } from "./setup";
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, utimesSync, openSync, closeSync } from "fs";
 import { join } from "path";
 
 const honchoDir = SHARED_HONCHO_DIR;
@@ -180,6 +180,22 @@ describe("Context Cache (workspace-keyed)", () => {
     mod.saveContextCache({ userContext: { data: { rep: "legacy" }, fetchedAt: Date.now() } });
     expect(mod.getCachedUserContext("ws-a")).toBeNull();
     expect(mod.loadContextCache().userContext).toBeDefined();
+  });
+});
+
+describe("Context Cache scope (cross-account isolation, fix D)", () => {
+  it("does not collide on the same workspace name across different scopes", async () => {
+    const mod = await import("../src/cache.js");
+    mod.setCachedUserContext("app", "A", "scope-a");
+    mod.setCachedUserContext("app", "B", "scope-b");
+    expect(mod.getCachedUserContext("app", "scope-a")).toBe("A");
+    expect(mod.getCachedUserContext("app", "scope-b")).toBe("B");
+  });
+
+  it("is backward-compatible: no scope still round-trips", async () => {
+    const mod = await import("../src/cache.js");
+    mod.setCachedUserContext("app", "no-scope-value");
+    expect(mod.getCachedUserContext("app")).toBe("no-scope-value");
   });
 });
 
@@ -436,5 +452,31 @@ describe("Context cache ghost key cleanup", () => {
     // File should have been rewritten without the ghost key
     const raw = JSON.parse(readFileSync(cacheFile, "utf-8"));
     expect(raw.aiContext).toBeUndefined();
+  });
+});
+
+describe("Context cache cross-process lock (fix F)", () => {
+  const lockFile = join(honchoDir, "context-cache.json.lock");
+
+  it("leaves no lock file behind after a setter completes", async () => {
+    const mod = await import("../src/cache.js");
+    mod.setCachedUserContext("app", { rep: "locked" });
+    expect(existsSync(lockFile)).toBe(false);
+  });
+
+  it("breaks a stale lock left by a crashed holder and still writes successfully", async () => {
+    const mod = await import("../src/cache.js");
+    mkdirSync(honchoDir, { recursive: true });
+    // Simulate a crashed holder: create the lock file, then backdate its mtime
+    // well past the staleness threshold.
+    const fd = openSync(lockFile, "w");
+    closeSync(fd);
+    const staleTime = new Date(Date.now() - 10_000);
+    utimesSync(lockFile, staleTime, staleTime);
+
+    mod.setCachedUserContext("app", { rep: "after-stale-lock" });
+
+    expect(mod.getCachedUserContext("app")).toEqual({ rep: "after-stale-lock" });
+    expect(existsSync(lockFile)).toBe(false);
   });
 });
