@@ -753,6 +753,24 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+/**
+ * Strictly coerce an MCP set_config `value` (untyped: string, number, boolean,
+ * ...) to a boolean. Unlike `Boolean(value)`, the string "false" (and "0",
+ * "no", "off", "") coerce to false instead of true -- `Boolean("false")` is
+ * `true` because it's a non-empty string, which silently enables a flag the
+ * caller meant to disable.
+ */
+export function parseConfigBool(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    if (v === "false" || v === "0" || v === "no" || v === "off" || v === "") return false;
+    if (v === "true" || v === "1" || v === "yes" || v === "on") return true;
+  }
+  return Boolean(value);
+}
+
 export function truncateToTokens(text: string, maxTokens: number): string {
   const estimatedChars = maxTokens * 4;
   if (text.length <= estimatedChars) {
@@ -951,11 +969,23 @@ function updateRawConfigFile(mutate: (raw: HonchoFileConfig) => void): void {
  * Derive a workspace name from a directory path (its final segment).
  * Returns "" when no meaningful segment exists (root or empty), so callers
  * can skip directories they can't name.
+ *
+ * When `taken` is provided, disambiguates a colliding basename (e.g. two
+ * uncovered dirs named "app") by prepending parent segments one at a time
+ * until the name isn't in `taken`. Without `taken`, behavior is unchanged:
+ * the bare basename.
  */
-export function deriveWorkspaceName(cwd: string): string {
+export function deriveWorkspaceName(cwd: string, taken?: Set<string>): string {
   if (!cwd) return "";
-  const trimmed = cwd.replace(/\/+$/, "");
-  return trimmed.split("/").pop() ?? "";
+  const segments = cwd.replace(/\/+$/, "").split("/").filter(Boolean);
+  if (segments.length === 0) return "";
+  let i = segments.length - 1;
+  let name = segments[i];
+  while (taken?.has(name) && i > 0) {
+    i--;
+    name = segments[i] + "-" + name;
+  }
+  return name;
 }
 
 /** True when `autoIsolate` is explicitly enabled in config.json. */
@@ -997,7 +1027,9 @@ export type IsolationAction = { action: "none" | "auto" | "nudge"; workspace: st
  */
 export function resolveIsolationAction(cwd: string): IsolationAction {
   if (!isIsolationCandidate(cwd)) return { action: "none", workspace: "" };
-  const workspace = deriveWorkspaceName(cwd);
+  const raw = readRawConfigFile();
+  const taken = new Set(Object.values(raw?.directoryWorkspaces ?? {}).map((e) => e.workspace));
+  const workspace = deriveWorkspaceName(cwd, taken);
   if (!workspace) return { action: "none", workspace: "" };
   if (wasKeptPooled(cwd)) return { action: "none", workspace: "" };
   if (isAutoIsolateEnabled()) return { action: "auto", workspace };
@@ -1025,5 +1057,9 @@ export function keepDirectoryPooled(cwd: string): void {
   updateRawConfigFile((raw) => {
     if (!raw.keepPooled) raw.keepPooled = [];
     if (!raw.keepPooled.includes(cwd)) raw.keepPooled.push(cwd);
+    // A prior isolateDirectory(cwd, ...) entry would otherwise keep routing
+    // this exact dir to its isolated workspace (resolveDirectoryOverride
+    // checks directoryWorkspaces first), making "now pooled" a lie.
+    if (raw.directoryWorkspaces) delete raw.directoryWorkspaces[cwd];
   });
 }
