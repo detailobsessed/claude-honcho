@@ -131,8 +131,12 @@ interface ContextCache {
   userContext?: ContextCacheEntry;
   claudeContext?: ContextCacheEntry;
   summaries?: ContextCacheEntry;
-  messageCount?: number; // Track messages since last refresh
-  lastRefreshMessageCount?: number; // Message count at last knowledge graph refresh
+  messageCount?: number; // Legacy single-slot field. No longer written; see messageCountByWorkspace.
+  lastRefreshMessageCount?: number; // Legacy single-slot field. No longer written; see lastRefreshByWorkspace.
+  // Message-refresh counters, keyed by wsKey(workspace, scope) so one workspace's
+  // messages don't skew another's refresh decision (context is per-workspace-scoped).
+  messageCountByWorkspace?: Record<string, number>;
+  lastRefreshByWorkspace?: Record<string, number>;
   injectedConclusions?: Record<string, string[]>; // instanceId -> already-injected cleaned conclusion strings
 }
 
@@ -159,7 +163,8 @@ function getMessageRefreshThreshold(): number {
 // Known keys in ContextCache — anything else is a ghost from older versions
 const CONTEXT_CACHE_KNOWN_KEYS = new Set([
   "userContextByWorkspace", "claudeContextByWorkspace",
-  "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount", "injectedConclusions",
+  "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount",
+  "messageCountByWorkspace", "lastRefreshByWorkspace", "injectedConclusions",
 ]);
 
 /**
@@ -179,16 +184,19 @@ function withContextCacheLock<T>(fn: () => T): T {
   while (fd === null) {
     try {
       fd = openSync(CONTEXT_CACHE_LOCK, "wx");
+      break;
     } catch {
+      // Couldn't take the lock. If a stale holder left it behind, break it;
+      // any other failure (lock vanished, or EACCES/EROFS/EMFILE) falls through
+      // to the timeout guard below so we can never spin forever.
       try {
         if (Date.now() - statSync(CONTEXT_CACHE_LOCK).mtimeMs > STALE_MS) {
           unlinkSync(CONTEXT_CACHE_LOCK);
-          continue;
         }
       } catch {
-        continue; // lock vanished between open and stat; retry
+        // fall through to the timeout guard
       }
-      if (Date.now() - start > TIMEOUT_MS) return fn(); // give up waiting
+      if (Date.now() - start > TIMEOUT_MS) return fn(); // give up; best-effort unlocked
       Bun.sleepSync(15);
     }
   }
@@ -276,43 +284,52 @@ export function isContextCacheStale(workspace: string, scope?: string): boolean 
   return Date.now() - entry.fetchedAt >= getContextTTL();
 }
 
-// Track message count for threshold-based refresh
-export function incrementMessageCount(): number {
+// Track message count for threshold-based refresh, keyed per workspace (+ optional
+// scope) via wsKey — see the ContextCache interface comment above.
+export function incrementMessageCount(workspace: string, scope?: string): number {
   return withContextCacheLock(() => {
     const cache = loadContextCache();
-    cache.messageCount = (cache.messageCount || 0) + 1;
+    if (!cache.messageCountByWorkspace) cache.messageCountByWorkspace = {};
+    const key = wsKey(workspace, scope);
+    cache.messageCountByWorkspace[key] = (cache.messageCountByWorkspace[key] || 0) + 1;
     saveContextCache(cache);
-    return cache.messageCount as number;
+    return cache.messageCountByWorkspace[key];
   });
 }
 
-export function getMessageCount(): number {
+export function getMessageCount(workspace: string, scope?: string): number {
   const cache = loadContextCache();
-  return cache.messageCount || 0;
+  return cache.messageCountByWorkspace?.[wsKey(workspace, scope)] ?? 0;
 }
 
-export function shouldRefreshKnowledgeGraph(): boolean {
+export function shouldRefreshKnowledgeGraph(workspace: string, scope?: string): boolean {
   const cache = loadContextCache();
-  const currentCount = cache.messageCount || 0;
-  const lastRefresh = cache.lastRefreshMessageCount || 0;
+  const key = wsKey(workspace, scope);
+  const currentCount = cache.messageCountByWorkspace?.[key] ?? 0;
+  const lastRefresh = cache.lastRefreshByWorkspace?.[key] ?? 0;
 
   // Refresh if we've sent threshold messages since last refresh
   return (currentCount - lastRefresh) >= getMessageRefreshThreshold();
 }
 
-export function markKnowledgeGraphRefreshed(): void {
+export function markKnowledgeGraphRefreshed(workspace: string, scope?: string): void {
   withContextCacheLock(() => {
     const cache = loadContextCache();
-    cache.lastRefreshMessageCount = cache.messageCount || 0;
+    if (!cache.lastRefreshByWorkspace) cache.lastRefreshByWorkspace = {};
+    const key = wsKey(workspace, scope);
+    cache.lastRefreshByWorkspace[key] = cache.messageCountByWorkspace?.[key] ?? 0;
     saveContextCache(cache);
   });
 }
 
-export function resetMessageCount(): void {
+export function resetMessageCount(workspace: string, scope?: string): void {
   withContextCacheLock(() => {
     const cache = loadContextCache();
-    cache.messageCount = 0;
-    cache.lastRefreshMessageCount = 0;
+    if (!cache.messageCountByWorkspace) cache.messageCountByWorkspace = {};
+    if (!cache.lastRefreshByWorkspace) cache.lastRefreshByWorkspace = {};
+    const key = wsKey(workspace, scope);
+    cache.messageCountByWorkspace[key] = 0;
+    cache.lastRefreshByWorkspace[key] = 0;
     saveContextCache(cache);
   });
 }

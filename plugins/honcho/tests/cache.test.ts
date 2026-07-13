@@ -114,32 +114,63 @@ describe("Context Cache", () => {
 
   it("message count tracking", async () => {
     const mod = await import("../src/cache.js");
-    expect(mod.getMessageCount()).toBe(0);
-    mod.incrementMessageCount();
-    mod.incrementMessageCount();
-    mod.incrementMessageCount();
-    expect(mod.getMessageCount()).toBe(3);
+    expect(mod.getMessageCount("test-ws")).toBe(0);
+    mod.incrementMessageCount("test-ws");
+    mod.incrementMessageCount("test-ws");
+    mod.incrementMessageCount("test-ws");
+    expect(mod.getMessageCount("test-ws")).toBe(3);
   });
 
   it("shouldRefreshKnowledgeGraph triggers after threshold", async () => {
     const mod = await import("../src/cache.js");
     for (let i = 0; i < 50; i++) {
-      mod.incrementMessageCount();
+      mod.incrementMessageCount("test-ws");
     }
-    expect(mod.shouldRefreshKnowledgeGraph()).toBe(true);
-    mod.markKnowledgeGraphRefreshed();
-    expect(mod.shouldRefreshKnowledgeGraph()).toBe(false);
+    expect(mod.shouldRefreshKnowledgeGraph("test-ws")).toBe(true);
+    mod.markKnowledgeGraphRefreshed("test-ws");
+    expect(mod.shouldRefreshKnowledgeGraph("test-ws")).toBe(false);
   });
 
   it("resetMessageCount zeroes count and lastRefresh", async () => {
     const mod = await import("../src/cache.js");
     for (let i = 0; i < 10; i++) {
-      mod.incrementMessageCount();
+      mod.incrementMessageCount("test-ws");
     }
-    mod.markKnowledgeGraphRefreshed();
-    mod.resetMessageCount();
-    expect(mod.getMessageCount()).toBe(0);
-    expect(mod.shouldRefreshKnowledgeGraph()).toBe(false);
+    mod.markKnowledgeGraphRefreshed("test-ws");
+    mod.resetMessageCount("test-ws");
+    expect(mod.getMessageCount("test-ws")).toBe(0);
+    expect(mod.shouldRefreshKnowledgeGraph("test-ws")).toBe(false);
+  });
+});
+
+describe("Message-refresh counters (per-workspace scoping, fix I)", () => {
+  it("incrementing workspace A's count does not change workspace B's getMessageCount", async () => {
+    const mod = await import("../src/cache.js");
+    mod.incrementMessageCount("ws-a");
+    mod.incrementMessageCount("ws-a");
+    expect(mod.getMessageCount("ws-a")).toBe(2);
+    expect(mod.getMessageCount("ws-b")).toBe(0);
+  });
+
+  it("shouldRefreshKnowledgeGraph can be true for A while false for B", async () => {
+    const mod = await import("../src/cache.js");
+    for (let i = 0; i < 50; i++) {
+      mod.incrementMessageCount("ws-a");
+    }
+    mod.incrementMessageCount("ws-b");
+    expect(mod.shouldRefreshKnowledgeGraph("ws-a")).toBe(true);
+    expect(mod.shouldRefreshKnowledgeGraph("ws-b")).toBe(false);
+  });
+
+  it("markKnowledgeGraphRefreshed(A) does not reset B's pending-refresh state", async () => {
+    const mod = await import("../src/cache.js");
+    for (let i = 0; i < 50; i++) {
+      mod.incrementMessageCount("ws-a");
+      mod.incrementMessageCount("ws-b");
+    }
+    mod.markKnowledgeGraphRefreshed("ws-a");
+    expect(mod.shouldRefreshKnowledgeGraph("ws-a")).toBe(false);
+    expect(mod.shouldRefreshKnowledgeGraph("ws-b")).toBe(true);
   });
 });
 

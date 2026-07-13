@@ -91,7 +91,7 @@ export async function handleSessionStart(): Promise<void> {
   clearVerboseLog();
 
   // Reset message count for this session (for threshold-based knowledge graph refresh)
-  resetMessageCount();
+  resetMessageCount(config.workspace, resolveCacheScope(config));
 
   // Capture git state (before any API calls for speed)
   const previousGitState = getCachedGitState(cwd);

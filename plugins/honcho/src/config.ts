@@ -917,7 +917,7 @@ function resolveDirectoryOverride(
   cwd: string,
 ): { workspace: string; apiKey?: string; aiPeer?: string; endpoint?: HonchoEndpointConfig } | null {
   if (!cwd) return null;
-  const exact = raw.directoryWorkspaces?.[cwd];
+  const exact = raw.directoryWorkspaces?.[normalizeDirPath(cwd)];
   if (exact) return exact;
   const rule = resolveWorkspaceRule(cwd, raw.workspaceRules);
   if (rule) return { workspace: rule.workspace, aiPeer: rule.aiPeer };
@@ -1023,7 +1023,7 @@ export function isIsolationCandidate(cwd: string): boolean {
 /** True when the user explicitly chose to keep `cwd` pooled (terminal decline). */
 export function wasKeptPooled(cwd: string): boolean {
   if (!cwd) return false;
-  return readRawConfigFile()?.keepPooled?.includes(cwd) ?? false;
+  return readRawConfigFile()?.keepPooled?.includes(normalizeDirPath(cwd)) ?? false;
 }
 
 export type IsolationAction = { action: "none" | "auto" | "nudge"; workspace: string };
@@ -1058,7 +1058,7 @@ export function isolateDirectory(cwd: string, workspace: string): void {
   if (!cwd || !workspace) return;
   updateRawConfigFile((raw) => {
     if (!raw.directoryWorkspaces) raw.directoryWorkspaces = {};
-    raw.directoryWorkspaces[cwd] = { workspace };
+    raw.directoryWorkspaces[normalizeDirPath(cwd)] = { workspace };
   });
 }
 
@@ -1068,12 +1068,13 @@ export function isolateDirectory(cwd: string, workspace: string): void {
  */
 export function keepDirectoryPooled(cwd: string): void {
   if (!cwd) return;
+  const normalized = normalizeDirPath(cwd);
   updateRawConfigFile((raw) => {
     if (!raw.keepPooled) raw.keepPooled = [];
-    if (!raw.keepPooled.includes(cwd)) raw.keepPooled.push(cwd);
+    if (!raw.keepPooled.includes(normalized)) raw.keepPooled.push(normalized);
     // A prior isolateDirectory(cwd, ...) entry would otherwise keep routing
     // this exact dir to its isolated workspace (resolveDirectoryOverride
     // checks directoryWorkspaces first), making "now pooled" a lie.
-    if (raw.directoryWorkspaces) delete raw.directoryWorkspaces[cwd];
+    if (raw.directoryWorkspaces) delete raw.directoryWorkspaces[normalized];
   });
 }
