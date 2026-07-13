@@ -29,6 +29,7 @@ import {
   resolveIsolationAction,
   isAutoIsolateEnabled,
   keepDirectoryPooled,
+  parseConfigBool,
   type HonchoCLAUDEConfig,
 } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
@@ -398,7 +399,7 @@ function handleSetConfig(args: Record<string, unknown>) {
 
     case "sessionPeerPrefix":
       previousValue = cfg.sessionPeerPrefix !== false;
-      cfg.sessionPeerPrefix = Boolean(value);
+      cfg.sessionPeerPrefix = parseConfigBool(value);
       // Clear persisted session names — they embed the old prefix
       cfg.sessions = {};
       break;
@@ -406,31 +407,31 @@ function handleSetConfig(args: Record<string, unknown>) {
 
     case "globalOverride":
       previousValue = cfg.globalOverride ?? false;
-      cfg.globalOverride = Boolean(value);
+      cfg.globalOverride = parseConfigBool(value);
       // globalOverride is a root-level flag — write to root (user-directed)
       saveRootField("globalOverride", cfg.globalOverride);
       break;
 
     case "autoIsolate":
       previousValue = isAutoIsolateEnabled();
-      newValue = Boolean(value);
+      newValue = parseConfigBool(value);
       // autoIsolate is a root-level flag — write to root (user-directed)
       saveRootField("autoIsolate", newValue);
       break;
 
     case "enabled":
       previousValue = cfg.enabled;
-      cfg.enabled = Boolean(value);
+      cfg.enabled = parseConfigBool(value);
       break;
 
     case "logging":
       previousValue = cfg.logging;
-      cfg.logging = Boolean(value);
+      cfg.logging = parseConfigBool(value);
       break;
 
     case "saveMessages":
       previousValue = cfg.saveMessages;
-      cfg.saveMessages = Boolean(value);
+      cfg.saveMessages = parseConfigBool(value);
       break;
 
     case "messageUpload.maxUserTokens":
@@ -448,7 +449,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     case "messageUpload.summarizeAssistant":
       previousValue = cfg.messageUpload?.summarizeAssistant;
       if (!cfg.messageUpload) cfg.messageUpload = {};
-      cfg.messageUpload.summarizeAssistant = Boolean(value);
+      cfg.messageUpload.summarizeAssistant = parseConfigBool(value);
       break;
 
     case "contextRefresh.messageThreshold":
@@ -466,7 +467,7 @@ function handleSetConfig(args: Record<string, unknown>) {
     case "contextRefresh.skipDialectic":
       previousValue = cfg.contextRefresh?.skipDialectic;
       if (!cfg.contextRefresh) cfg.contextRefresh = {};
-      cfg.contextRefresh.skipDialectic = Boolean(value);
+      cfg.contextRefresh.skipDialectic = parseConfigBool(value);
       break;
 
     case "reasoningLevel":

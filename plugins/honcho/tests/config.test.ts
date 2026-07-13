@@ -673,6 +673,26 @@ describe("deriveWorkspaceName", () => {
     const mod = await import("../src/config.js");
     expect(mod.deriveWorkspaceName("")).toBe("");
   });
+
+  it("with no taken set, behaves unchanged (bare basename)", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("/work/app")).toBe("app");
+  });
+
+  it("disambiguates by prepending the parent segment when the basename is taken", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("/work/app", new Set(["app"]))).toBe("work-app");
+  });
+
+  it("keeps walking up when the first disambiguated name is also taken", async () => {
+    // Needs 3+ segments: with only "/work/app" (2 segments), "work-app" is the
+    // last name the algorithm can produce (i reaches 0), so it can't avoid a
+    // taken "work-app" -- that requires a deeper path to walk further.
+    const mod = await import("../src/config.js");
+    const result = mod.deriveWorkspaceName("/parent/work/app", new Set(["app", "work-app"]));
+    expect(result).not.toBe("app");
+    expect(result).not.toBe("work-app");
+  });
 });
 
 describe("isAutoIsolateEnabled", () => {
@@ -814,6 +834,19 @@ describe("resolveIsolationAction", () => {
     const mod = await import("../src/config.js");
     expect(mod.resolveIsolationAction("/").action).toBe("none");
   });
+
+  it("disambiguates a colliding basename against existing directoryWorkspaces entries", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      autoIsolate: true,
+      directoryWorkspaces: { "/some/other/app": { workspace: "app" } },
+    });
+    const mod = await import("../src/config.js");
+    const result = mod.resolveIsolationAction("/personal/app");
+    expect(result.action).toBe("auto");
+    expect(result.workspace).not.toBe("app");
+  });
 });
 
 describe("isolateDirectory", () => {
@@ -881,5 +914,74 @@ describe("keepDirectoryPooled / wasKeptPooled", () => {
     const mod = await import("../src/config.js");
     mod.keepDirectoryPooled("");
     expect(readRawConfig().keepPooled).toBeUndefined();
+  });
+
+  it("un-isolates a directory that was previously isolated, so routing actually pools it", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    const cwd = "/Users/alice/work-project";
+
+    mod.isolateDirectory(cwd, "someworkspace");
+    expect(readRawConfig().directoryWorkspaces[cwd]).toEqual({ workspace: "someworkspace" });
+
+    mod.keepDirectoryPooled(cwd);
+
+    const raw = readRawConfig();
+    expect(raw.directoryWorkspaces[cwd]).toBeUndefined();
+    expect(raw.keepPooled).toContain(cwd);
+
+    const baseConfig = {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspace: "global-ws",
+      aiPeer: "claude",
+    } as import("../src/config.js").HonchoCLAUDEConfig;
+    const resolved = mod.applyDirectoryOverride(baseConfig, cwd);
+    expect(resolved.workspace).toBe(baseConfig.workspace);
+  });
+});
+
+describe("parseConfigBool", () => {
+  it("passes through actual booleans", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.parseConfigBool(true)).toBe(true);
+    expect(mod.parseConfigBool(false)).toBe(false);
+  });
+
+  it('coerces the string "false" to false (the bug this guards against)', async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.parseConfigBool("false")).toBe(false);
+  });
+
+  it('coerces the string "true" to true', async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.parseConfigBool("true")).toBe(true);
+  });
+
+  it('coerces "0" to false and "1" to true', async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.parseConfigBool("0")).toBe(false);
+    expect(mod.parseConfigBool("1")).toBe(true);
+  });
+
+  it("coerces an empty string to false", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.parseConfigBool("")).toBe(false);
+  });
+
+  it("coerces numeric 0 to false and 1 to true", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.parseConfigBool(0)).toBe(false);
+    expect(mod.parseConfigBool(1)).toBe(true);
+  });
+
+  it('is case-insensitive ("FALSE" -> false)', async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.parseConfigBool("FALSE")).toBe(false);
+  });
+
+  it('coerces "off" to false', async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.parseConfigBool("off")).toBe(false);
   });
 });
