@@ -234,8 +234,8 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   // Track message count for threshold-based refresh
-  const messageCountBefore = getMessageCount();
-  incrementMessageCount();
+  const messageCountBefore = getMessageCount(config.workspace, resolveCacheScope(config));
+  incrementMessageCount(config.workspace, resolveCacheScope(config));
   // Only surface the app.honcho.dev session link when actually pointed at the
   // hosted platform — for self-hosted ("local") or custom-baseUrl deployments
   // the GUI at app.honcho.dev has no access to the user's data and the link
@@ -256,7 +256,7 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   // Decide whether to refresh: TTL expired or message threshold hit
-  const forceRefresh = shouldRefreshKnowledgeGraph();
+  const forceRefresh = shouldRefreshKnowledgeGraph(config.workspace, resolveCacheScope(config));
   const cachedContext = getCachedUserContext(config.workspace, resolveCacheScope(config));
   const cacheIsStale = isContextCacheStale(config.workspace, resolveCacheScope(config));
 
@@ -281,7 +281,7 @@ export async function handleUserPrompt(): Promise<void> {
   if (fetchResult.ok) {
     const { context } = fetchResult;
     if (forceRefresh) {
-      markKnowledgeGraphRefreshed();
+      markKnowledgeGraphRefreshed(config.workspace, resolveCacheScope(config));
     }
     if (context) {
       serveContext(config.peerName, context, false, instanceId || "", sessionLink);

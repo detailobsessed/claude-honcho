@@ -980,6 +980,47 @@ describe("keepDirectoryPooled / wasKeptPooled", () => {
   });
 });
 
+describe("directoryWorkspaces cwd normalization (fix H)", () => {
+  const base = () => ({
+    apiKey: "hch-key",
+    peerName: "user",
+    workspace: "default-ws",
+    aiPeer: "claude",
+  } as import("../src/config.js").HonchoCLAUDEConfig);
+
+  it("an entry keyed '/project' is matched by a cwd with a trailing slash", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: { "/project": { workspace: "Project" } },
+    });
+    const mod = await import("../src/config.js");
+    const result = mod.applyDirectoryOverride(base(), "/project/");
+    expect(result.workspace).toBe("Project");
+  });
+
+  it("isolateDirectory stores a normalized key for a Windows-separator cwd, and it round-trips through applyDirectoryOverride", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    mod.isolateDirectory("C:\\Users\\me\\proj", "proj");
+    expect(readRawConfig().directoryWorkspaces["C:/Users/me/proj"]).toEqual({ workspace: "proj" });
+    const result = mod.applyDirectoryOverride(base(), "C:\\Users\\me\\proj");
+    expect(result.workspace).toBe("proj");
+  });
+
+  it("keepDirectoryPooled('/x/') is read back by wasKeptPooled('/x') and removes a prior directoryWorkspaces['/x'] entry", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: { "/x": { workspace: "X" } },
+    });
+    const mod = await import("../src/config.js");
+    mod.keepDirectoryPooled("/x/");
+    expect(mod.wasKeptPooled("/x")).toBe(true);
+    expect(readRawConfig().directoryWorkspaces["/x"]).toBeUndefined();
+  });
+});
+
 describe("parseConfigBool", () => {
   it("passes through actual booleans", async () => {
     const mod = await import("../src/config.js");
