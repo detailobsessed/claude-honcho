@@ -1,11 +1,12 @@
 import { homedir } from "os";
 import { join } from "path";
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, openSync, closeSync, unlinkSync, statSync, renameSync } from "fs";
 import { getContextRefreshConfig, getLocalContextConfig } from "./config.js";
 
 const CACHE_DIR = join(homedir(), ".honcho");
 const ID_CACHE_FILE = join(CACHE_DIR, "cache.json");
 const CONTEXT_CACHE_FILE = join(CACHE_DIR, "context-cache.json");
+const CONTEXT_CACHE_LOCK = CONTEXT_CACHE_FILE + ".lock";
 const MESSAGE_QUEUE_FILE = join(CACHE_DIR, "message-queue.jsonl");
 const CLAUDE_CONTEXT_FILE = join(CACHE_DIR, "claude-context.md");
 
@@ -135,9 +136,13 @@ interface ContextCache {
   injectedConclusions?: Record<string, string[]>; // instanceId -> already-injected cleaned conclusion strings
 }
 
-/** Cache key for a workspace, with a sentinel for empty/unset. */
-function wsKey(workspace: string): string {
-  return workspace && workspace.trim() ? workspace : "_global";
+/** Cache key for a workspace, with a sentinel for empty/unset. Optionally
+ *  scoped to a Honcho endpoint/account (see resolveCacheScope in config.ts)
+ *  so two directories sharing a workspace NAME but pointing at different
+ *  backends/accounts don't share a cache slot. */
+function wsKey(workspace: string, scope?: string): string {
+  const base = workspace && workspace.trim() ? workspace : "_global";
+  return scope ? `${base}@${scope}` : base;
 }
 
 // These are now configurable via config.json, with defaults in getContextRefreshConfig()
@@ -156,6 +161,44 @@ const CONTEXT_CACHE_KNOWN_KEYS = new Set([
   "userContextByWorkspace", "claudeContextByWorkspace",
   "userContext", "claudeContext", "summaries", "messageCount", "lastRefreshMessageCount", "injectedConclusions",
 ]);
+
+/**
+ * Serialize read-modify-write of context-cache.json across processes
+ * (multiple hook processes + the MCP server). Without it, two processes
+ * writing different workspace entries clobber each other. Best-effort: a
+ * crashed holder's stale lock is broken after STALE_MS, and if the lock
+ * can't be taken within TIMEOUT_MS we proceed unlocked rather than hang a
+ * short-lived hook.
+ */
+function withContextCacheLock<T>(fn: () => T): T {
+  ensureCacheDir();
+  const STALE_MS = 5000;
+  const TIMEOUT_MS = 3000;
+  const start = Date.now();
+  let fd: number | null = null;
+  while (fd === null) {
+    try {
+      fd = openSync(CONTEXT_CACHE_LOCK, "wx");
+    } catch {
+      try {
+        if (Date.now() - statSync(CONTEXT_CACHE_LOCK).mtimeMs > STALE_MS) {
+          unlinkSync(CONTEXT_CACHE_LOCK);
+          continue;
+        }
+      } catch {
+        continue; // lock vanished between open and stat; retry
+      }
+      if (Date.now() - start > TIMEOUT_MS) return fn(); // give up waiting
+      Bun.sleepSync(15);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    try { unlinkSync(CONTEXT_CACHE_LOCK); } catch { /* already gone */ }
+  }
+}
 
 export function loadContextCache(): ContextCache {
   ensureCacheDir();
@@ -183,11 +226,13 @@ export function loadContextCache(): ContextCache {
 
 export function saveContextCache(cache: ContextCache): void {
   ensureCacheDir();
-  writeFileSync(CONTEXT_CACHE_FILE, JSON.stringify(cache, null, 2));
+  const tmp = `${CONTEXT_CACHE_FILE}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cache, null, 2));
+  renameSync(tmp, CONTEXT_CACHE_FILE);
 }
 
-export function getCachedUserContext(workspace: string): any | null {
-  const entry = loadContextCache().userContextByWorkspace?.[wsKey(workspace)];
+export function getCachedUserContext(workspace: string, scope?: string): any | null {
+  const entry = loadContextCache().userContextByWorkspace?.[wsKey(workspace, scope)];
   if (entry && Date.now() - entry.fetchedAt < getContextTTL()) {
     return entry.data;
   }
@@ -195,44 +240,50 @@ export function getCachedUserContext(workspace: string): any | null {
 }
 
 /** Return cached context even if expired (for timeout fallback) */
-export function getStaleCachedUserContext(workspace: string): any | null {
-  return loadContextCache().userContextByWorkspace?.[wsKey(workspace)]?.data ?? null;
+export function getStaleCachedUserContext(workspace: string, scope?: string): any | null {
+  return loadContextCache().userContextByWorkspace?.[wsKey(workspace, scope)]?.data ?? null;
 }
 
-export function setCachedUserContext(workspace: string, data: any): void {
-  const cache = loadContextCache();
-  if (!cache.userContextByWorkspace) cache.userContextByWorkspace = {};
-  cache.userContextByWorkspace[wsKey(workspace)] = { data, fetchedAt: Date.now() };
-  saveContextCache(cache);
+export function setCachedUserContext(workspace: string, data: any, scope?: string): void {
+  withContextCacheLock(() => {
+    const cache = loadContextCache();
+    if (!cache.userContextByWorkspace) cache.userContextByWorkspace = {};
+    cache.userContextByWorkspace[wsKey(workspace, scope)] = { data, fetchedAt: Date.now() };
+    saveContextCache(cache);
+  });
 }
 
-export function getCachedClaudeContext(workspace: string): any | null {
-  const entry = loadContextCache().claudeContextByWorkspace?.[wsKey(workspace)];
+export function getCachedClaudeContext(workspace: string, scope?: string): any | null {
+  const entry = loadContextCache().claudeContextByWorkspace?.[wsKey(workspace, scope)];
   if (entry && Date.now() - entry.fetchedAt < getContextTTL()) {
     return entry.data;
   }
   return null;
 }
 
-export function setCachedClaudeContext(workspace: string, data: any): void {
-  const cache = loadContextCache();
-  if (!cache.claudeContextByWorkspace) cache.claudeContextByWorkspace = {};
-  cache.claudeContextByWorkspace[wsKey(workspace)] = { data, fetchedAt: Date.now() };
-  saveContextCache(cache);
+export function setCachedClaudeContext(workspace: string, data: any, scope?: string): void {
+  withContextCacheLock(() => {
+    const cache = loadContextCache();
+    if (!cache.claudeContextByWorkspace) cache.claudeContextByWorkspace = {};
+    cache.claudeContextByWorkspace[wsKey(workspace, scope)] = { data, fetchedAt: Date.now() };
+    saveContextCache(cache);
+  });
 }
 
-export function isContextCacheStale(workspace: string): boolean {
-  const entry = loadContextCache().userContextByWorkspace?.[wsKey(workspace)];
+export function isContextCacheStale(workspace: string, scope?: string): boolean {
+  const entry = loadContextCache().userContextByWorkspace?.[wsKey(workspace, scope)];
   if (!entry) return true;
   return Date.now() - entry.fetchedAt >= getContextTTL();
 }
 
 // Track message count for threshold-based refresh
 export function incrementMessageCount(): number {
-  const cache = loadContextCache();
-  cache.messageCount = (cache.messageCount || 0) + 1;
-  saveContextCache(cache);
-  return cache.messageCount;
+  return withContextCacheLock(() => {
+    const cache = loadContextCache();
+    cache.messageCount = (cache.messageCount || 0) + 1;
+    saveContextCache(cache);
+    return cache.messageCount as number;
+  });
 }
 
 export function getMessageCount(): number {
@@ -250,16 +301,20 @@ export function shouldRefreshKnowledgeGraph(): boolean {
 }
 
 export function markKnowledgeGraphRefreshed(): void {
-  const cache = loadContextCache();
-  cache.lastRefreshMessageCount = cache.messageCount || 0;
-  saveContextCache(cache);
+  withContextCacheLock(() => {
+    const cache = loadContextCache();
+    cache.lastRefreshMessageCount = cache.messageCount || 0;
+    saveContextCache(cache);
+  });
 }
 
 export function resetMessageCount(): void {
-  const cache = loadContextCache();
-  cache.messageCount = 0;
-  cache.lastRefreshMessageCount = 0;
-  saveContextCache(cache);
+  withContextCacheLock(() => {
+    const cache = loadContextCache();
+    cache.messageCount = 0;
+    cache.lastRefreshMessageCount = 0;
+    saveContextCache(cache);
+  });
 }
 
 // ============================================
@@ -280,24 +335,26 @@ export function getInjectedConclusions(instanceId: string): string[] {
 export function addInjectedConclusions(instanceId: string, lines: string[]): void {
   if (!instanceId || lines.length === 0) return;
 
-  const cache = loadContextCache();
-  if (!cache.injectedConclusions) cache.injectedConclusions = {};
+  withContextCacheLock(() => {
+    const cache = loadContextCache();
+    if (!cache.injectedConclusions) cache.injectedConclusions = {};
 
-  const existing = cache.injectedConclusions[instanceId] ?? [];
-  const merged = [...existing];
-  for (const line of lines) {
-    if (!merged.includes(line)) merged.push(line);
-  }
-  cache.injectedConclusions[instanceId] = merged.slice(-MAX_INJECTED_PER_SESSION);
+    const existing = cache.injectedConclusions[instanceId] ?? [];
+    const merged = [...existing];
+    for (const line of lines) {
+      if (!merged.includes(line)) merged.push(line);
+    }
+    cache.injectedConclusions[instanceId] = merged.slice(-MAX_INJECTED_PER_SESSION);
 
-  // Evict oldest-inserted sessions once we exceed the tracked-session cap.
-  const keys = Object.keys(cache.injectedConclusions);
-  if (keys.length > MAX_TRACKED_SESSIONS) {
-    const toEvict = keys.slice(0, keys.length - MAX_TRACKED_SESSIONS);
-    for (const key of toEvict) delete cache.injectedConclusions[key];
-  }
+    // Evict oldest-inserted sessions once we exceed the tracked-session cap.
+    const keys = Object.keys(cache.injectedConclusions);
+    if (keys.length > MAX_TRACKED_SESSIONS) {
+      const toEvict = keys.slice(0, keys.length - MAX_TRACKED_SESSIONS);
+      for (const key of toEvict) delete cache.injectedConclusions[key];
+    }
 
-  saveContextCache(cache);
+    saveContextCache(cache);
+  });
 }
 
 // ============================================
@@ -646,16 +703,20 @@ export function clearPeerCache(): void {
 
 /** Clear only userContext from the context cache */
 export function clearUserContextOnly(): void {
-  const cache = loadContextCache();
-  delete cache.userContextByWorkspace;
-  delete cache.userContext; // legacy slot
-  saveContextCache(cache);
+  withContextCacheLock(() => {
+    const cache = loadContextCache();
+    delete cache.userContextByWorkspace;
+    delete cache.userContext; // legacy slot
+    saveContextCache(cache);
+  });
 }
 
 /** Clear only claudeContext from the context cache (all workspaces) */
 export function clearClaudeContextOnly(): void {
-  const cache = loadContextCache();
-  delete cache.claudeContextByWorkspace;
-  delete cache.claudeContext; // legacy slot
-  saveContextCache(cache);
+  withContextCacheLock(() => {
+    const cache = loadContextCache();
+    delete cache.claudeContextByWorkspace;
+    delete cache.claudeContext; // legacy slot
+    saveContextCache(cache);
+  });
 }

@@ -648,6 +648,35 @@ describe("getHonchoClientOptions SDK timeout (issue #25)", () => {
   });
 });
 
+describe("resolveCacheScope", () => {
+  const baseConfig = {
+    apiKey: "hch-key-a",
+    workspace: "test-ws",
+  } as unknown as import("../src/config.js").HonchoCLAUDEConfig;
+
+  it("differs for two configs with different apiKey but the same endpoint", async () => {
+    const mod = await import("../src/config.js");
+    const scopeA = mod.resolveCacheScope(baseConfig);
+    const scopeB = mod.resolveCacheScope({ ...baseConfig, apiKey: "hch-key-b" });
+    expect(scopeA).not.toBe(scopeB);
+  });
+
+  it("differs for different endpoint URLs", async () => {
+    const mod = await import("../src/config.js");
+    const scopeProd = mod.resolveCacheScope(baseConfig);
+    const scopeLocal = mod.resolveCacheScope({
+      ...baseConfig,
+      endpoint: { environment: "local" },
+    } as import("../src/config.js").HonchoCLAUDEConfig);
+    expect(scopeProd).not.toBe(scopeLocal);
+  });
+
+  it("is stable for the same input", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.resolveCacheScope(baseConfig)).toBe(mod.resolveCacheScope(baseConfig));
+  });
+});
+
 describe("deriveWorkspaceName", () => {
   it("returns the basename of a directory path", async () => {
     const mod = await import("../src/config.js");
@@ -692,6 +721,16 @@ describe("deriveWorkspaceName", () => {
     const result = mod.deriveWorkspaceName("/parent/work/app", new Set(["app", "work-app"]));
     expect(result).not.toBe("app");
     expect(result).not.toBe("work-app");
+  });
+
+  it("normalizes a Windows path (backslashes) to its basename", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("C:\\Users\\me\\app")).toBe("app");
+  });
+
+  it("disambiguates a colliding basename on a Windows path", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("C:\\Users\\me\\app", new Set(["app"]))).toBe("me-app");
   });
 });
 
