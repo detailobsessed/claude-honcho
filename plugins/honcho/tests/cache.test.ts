@@ -74,40 +74,42 @@ describe("ID Cache", () => {
 });
 
 describe("Context Cache", () => {
+  const WS = "test-ws";
+
   it("getCachedUserContext returns null when no cache", async () => {
     const mod = await import("../src/cache.js");
-    expect(mod.getCachedUserContext()).toBeNull();
+    expect(mod.getCachedUserContext(WS)).toBeNull();
   });
 
   it("setCachedUserContext and getCachedUserContext round-trip within TTL", async () => {
     const mod = await import("../src/cache.js");
-    mod.setCachedUserContext({ representation: "test-rep" });
-    const result = mod.getCachedUserContext();
+    mod.setCachedUserContext(WS, { representation: "test-rep" });
+    const result = mod.getCachedUserContext(WS);
     expect(result).not.toBeNull();
     expect(result.representation).toBe("test-rep");
   });
 
   it("getStaleCachedUserContext returns data even after TTL expires", async () => {
     const mod = await import("../src/cache.js");
-    mod.setCachedUserContext({ representation: "stale-rep" });
+    mod.setCachedUserContext(WS, { representation: "stale-rep" });
     // Manually backdate the fetchedAt timestamp
     const cache = mod.loadContextCache();
-    cache.userContext!.fetchedAt = Date.now() - 999999999;
+    cache.userContextByWorkspace![WS].fetchedAt = Date.now() - 999999999;
     mod.saveContextCache(cache);
-    expect(mod.getCachedUserContext()).toBeNull();
-    expect(mod.getStaleCachedUserContext()).not.toBeNull();
-    expect(mod.getStaleCachedUserContext().representation).toBe("stale-rep");
+    expect(mod.getCachedUserContext(WS)).toBeNull();
+    expect(mod.getStaleCachedUserContext(WS)).not.toBeNull();
+    expect(mod.getStaleCachedUserContext(WS).representation).toBe("stale-rep");
   });
 
   it("isContextCacheStale returns true when no cache", async () => {
     const mod = await import("../src/cache.js");
-    expect(mod.isContextCacheStale()).toBe(true);
+    expect(mod.isContextCacheStale(WS)).toBe(true);
   });
 
   it("isContextCacheStale returns false within TTL", async () => {
     const mod = await import("../src/cache.js");
-    mod.setCachedUserContext({ data: "test" });
-    expect(mod.isContextCacheStale()).toBe(false);
+    mod.setCachedUserContext(WS, { data: "test" });
+    expect(mod.isContextCacheStale(WS)).toBe(false);
   });
 
   it("message count tracking", async () => {
@@ -138,6 +140,46 @@ describe("Context Cache", () => {
     mod.resetMessageCount();
     expect(mod.getMessageCount()).toBe(0);
     expect(mod.shouldRefreshKnowledgeGraph()).toBe(false);
+  });
+});
+
+describe("Context Cache (workspace-keyed)", () => {
+  it("serves user context only to the workspace it was set under", async () => {
+    const mod = await import("../src/cache.js");
+    mod.setCachedUserContext("ws-a", { rep: "A" });
+    expect(mod.getCachedUserContext("ws-a")).toEqual({ rep: "A" });
+    expect(mod.getCachedUserContext("ws-b")).toBeNull();
+  });
+
+  it("TTL-gates per workspace; the stale getter ignores TTL", async () => {
+    const mod = await import("../src/cache.js");
+    mod.setCachedUserContext("ws-a", { rep: "A" });
+    const cache = mod.loadContextCache();
+    cache.userContextByWorkspace!["ws-a"].fetchedAt = Date.now() - 10 * 60 * 1000; // >5min TTL
+    mod.saveContextCache(cache);
+    expect(mod.getCachedUserContext("ws-a")).toBeNull();
+    expect(mod.getStaleCachedUserContext("ws-a")).toEqual({ rep: "A" });
+  });
+
+  it("isContextCacheStale is true for an unseen workspace, false right after set", async () => {
+    const mod = await import("../src/cache.js");
+    expect(mod.isContextCacheStale("ws-a")).toBe(true);
+    mod.setCachedUserContext("ws-a", { rep: "A" });
+    expect(mod.isContextCacheStale("ws-a")).toBe(false);
+  });
+
+  it("claude context is likewise workspace-keyed", async () => {
+    const mod = await import("../src/cache.js");
+    mod.setCachedClaudeContext("ws-a", { rep: "CA" });
+    expect(mod.getCachedClaudeContext("ws-a")).toEqual({ rep: "CA" });
+    expect(mod.getCachedClaudeContext("ws-b")).toBeNull();
+  });
+
+  it("does not serve or strip a legacy single-slot userContext on upgrade", async () => {
+    const mod = await import("../src/cache.js");
+    mod.saveContextCache({ userContext: { data: { rep: "legacy" }, fetchedAt: Date.now() } });
+    expect(mod.getCachedUserContext("ws-a")).toBeNull();
+    expect(mod.loadContextCache().userContext).toBeDefined();
   });
 });
 

@@ -6,10 +6,17 @@
  * between tests.
  */
 import { describe, expect, it, beforeAll, beforeEach, afterEach, afterAll } from "bun:test";
-import { clearSharedHonchoDir, SHARED_HONCHO_DIR } from "./setup";
+import { clearSharedHonchoDir, SHARED_HONCHO_DIR, SHARED_HOME } from "./setup";
 import { writeHonchoConfig } from "./helpers";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 const honchoDir = SHARED_HONCHO_DIR;
+
+/** Read ~/.honcho/config.json back as a raw object (for write-path assertions). */
+function readRawConfig(): any {
+  return JSON.parse(readFileSync(join(honchoDir, "config.json"), "utf-8"));
+}
 
 let originalHonchoApiKey: string | undefined;
 let originalHonchoPeerName: string | undefined;
@@ -274,6 +281,343 @@ describe("isPluginEnabled", () => {
   });
 });
 
+describe("applyDirectoryOverride", () => {
+  it("returns config unchanged when no config file exists", async () => {
+    const mod = await import("../src/config.js");
+    const config = {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspace: "default-ws",
+      aiPeer: "claude",
+    } as import("../src/config.js").HonchoCLAUDEConfig;
+    const result = mod.applyDirectoryOverride(config, "/Users/alice/some-project");
+    expect(result).toBe(config);
+  });
+
+  it("returns config unchanged when directoryWorkspaces has no matching entry", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: {
+        "/Users/alice/other-project": { workspace: "Other" },
+      },
+    });
+    const mod = await import("../src/config.js");
+    const config = {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspace: "default-ws",
+      aiPeer: "claude",
+    } as import("../src/config.js").HonchoCLAUDEConfig;
+    const result = mod.applyDirectoryOverride(config, "/Users/alice/some-project");
+    expect(result).toBe(config);
+  });
+
+  it("patches workspace when directoryWorkspaces has a matching entry", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: {
+        "/Users/alice/work-project": { workspace: "Work" },
+      },
+    });
+    const mod = await import("../src/config.js");
+    const config = {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspace: "default-ws",
+      aiPeer: "claude",
+    } as import("../src/config.js").HonchoCLAUDEConfig;
+    const result = mod.applyDirectoryOverride(config, "/Users/alice/work-project");
+    expect(result).not.toBe(config);
+    expect(result.workspace).toBe("Work");
+    // Unrelated fields fall through unchanged
+    expect(result.peerName).toBe(config.peerName);
+    expect(result.apiKey).toBe(config.apiKey);
+    expect(result.aiPeer).toBe(config.aiPeer);
+  });
+
+  it("patches apiKey and aiPeer when provided in the override entry", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: {
+        "/Users/alice/work-project": {
+          workspace: "Work",
+          apiKey: "hch-work-key",
+          aiPeer: "work-claude",
+        },
+      },
+    });
+    const mod = await import("../src/config.js");
+    const config = {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspace: "default-ws",
+      aiPeer: "claude",
+    } as import("../src/config.js").HonchoCLAUDEConfig;
+    const result = mod.applyDirectoryOverride(config, "/Users/alice/work-project");
+    expect(result.workspace).toBe("Work");
+    expect(result.apiKey).toBe("hch-work-key");
+    expect(result.aiPeer).toBe("work-claude");
+  });
+
+  it("falls back to the base config's apiKey/aiPeer when the override entry omits them", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: {
+        "/Users/alice/work-project": { workspace: "Work" },
+      },
+    });
+    const mod = await import("../src/config.js");
+    const config = {
+      apiKey: "hch-base-key",
+      peerName: "user",
+      workspace: "default-ws",
+      aiPeer: "base-claude",
+    } as import("../src/config.js").HonchoCLAUDEConfig;
+    const result = mod.applyDirectoryOverride(config, "/Users/alice/work-project");
+    expect(result.workspace).toBe("Work");
+    expect(result.apiKey).toBe("hch-base-key");
+    expect(result.aiPeer).toBe("base-claude");
+  });
+
+  it("returns the original config on a corrupt config file", async () => {
+    const { mkdirSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    mkdirSync(honchoDir, { recursive: true });
+    writeFileSync(join(honchoDir, "config.json"), "{ not valid json");
+    const mod = await import("../src/config.js");
+    const config = {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspace: "default-ws",
+      aiPeer: "claude",
+    } as import("../src/config.js").HonchoCLAUDEConfig;
+    const result = mod.applyDirectoryOverride(config, "/Users/alice/work-project");
+    expect(result).toBe(config);
+  });
+
+  it("returns config unchanged when cwd is empty", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: {
+        "": { workspace: "Weird" },
+      },
+    });
+    const mod = await import("../src/config.js");
+    const config = {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspace: "default-ws",
+      aiPeer: "claude",
+    } as import("../src/config.js").HonchoCLAUDEConfig;
+    const result = mod.applyDirectoryOverride(config, "");
+    expect(result).toBe(config);
+  });
+});
+
+describe("resolveWorkspaceRule", () => {
+  const WORK = `${SHARED_HOME}/code/work`;
+
+  it("returns null when rules are missing or empty", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.resolveWorkspaceRule(WORK, undefined)).toBeNull();
+    expect(mod.resolveWorkspaceRule(WORK, [])).toBeNull();
+  });
+
+  it("matches a directory equal to the prefix and any subdirectory", async () => {
+    const mod = await import("../src/config.js");
+    const rules = [{ cwdPrefix: "~/code/work", workspace: "Work" }];
+    expect(mod.resolveWorkspaceRule(WORK, rules)?.workspace).toBe("Work");
+    expect(mod.resolveWorkspaceRule(`${WORK}/repo/src`, rules)?.workspace).toBe("Work");
+  });
+
+  it("does not match sibling directories that share a name prefix", async () => {
+    const mod = await import("../src/config.js");
+    const rules = [{ cwdPrefix: "~/code/work", workspace: "Work" }];
+    expect(mod.resolveWorkspaceRule(`${SHARED_HOME}/code/work-old`, rules)).toBeNull();
+    expect(mod.resolveWorkspaceRule(`${SHARED_HOME}/code/workshop`, rules)).toBeNull();
+  });
+
+  it("expands ~ to the home directory", async () => {
+    const mod = await import("../src/config.js");
+    const rules = [{ cwdPrefix: "~", workspace: "Home" }];
+    expect(mod.resolveWorkspaceRule(`${SHARED_HOME}/anything`, rules)?.workspace).toBe("Home");
+  });
+
+  it("normalizes trailing slashes and backslashes on both sides", async () => {
+    const mod = await import("../src/config.js");
+    const rules = [{ cwdPrefix: "~/code/work/", workspace: "Work" }];
+    expect(mod.resolveWorkspaceRule(`${WORK}/`, rules)?.workspace).toBe("Work");
+    expect(mod.resolveWorkspaceRule(`${SHARED_HOME}\\code\\work\\repo`, rules)?.workspace).toBe("Work");
+  });
+
+  it("chooses the longest matching prefix, not the first in the array", async () => {
+    const mod = await import("../src/config.js");
+    const rules = [
+      { cwdPrefix: "~/code", workspace: "Broad" },
+      { cwdPrefix: "~/code/work", workspace: "Work" },
+    ];
+    expect(mod.resolveWorkspaceRule(`${WORK}/x`, rules)?.workspace).toBe("Work");
+    expect(mod.resolveWorkspaceRule(`${SHARED_HOME}/code/other`, rules)?.workspace).toBe("Broad");
+  });
+
+  it("ignores an empty prefix instead of matching every directory", async () => {
+    const mod = await import("../src/config.js");
+    const rules = [{ cwdPrefix: "", workspace: "Everywhere" }];
+    expect(mod.resolveWorkspaceRule(`${SHARED_HOME}/anything`, rules)).toBeNull();
+  });
+});
+
+describe("workspaceRules routing (applyDirectoryOverride + isIsolationCandidate)", () => {
+  const WORK = `${SHARED_HOME}/code/work`;
+  const base = () => ({
+    apiKey: "hch-key",
+    peerName: "user",
+    workspace: "global-ws",
+    aiPeer: "claude",
+  } as import("../src/config.js").HonchoCLAUDEConfig);
+
+  it("applyDirectoryOverride patches workspace and aiPeer from a matching prefix rule", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspaceRules: [{ cwdPrefix: "~/code/work", workspace: "Work", aiPeer: "work-claude" }],
+    });
+    const mod = await import("../src/config.js");
+    const result = mod.applyDirectoryOverride(base(), `${WORK}/repo`);
+    expect(result.workspace).toBe("Work");
+    expect(result.aiPeer).toBe("work-claude");
+  });
+
+  it("an exact directoryWorkspaces entry wins over a matching prefix rule", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: { [WORK]: { workspace: "Exact" } },
+      workspaceRules: [{ cwdPrefix: "~/code/work", workspace: "Rule" }],
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.applyDirectoryOverride(base(), WORK).workspace).toBe("Exact");
+  });
+
+  it("falls through to the same config reference when no rule and no entry match", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspaceRules: [{ cwdPrefix: "~/code/work", workspace: "Work" }],
+    });
+    const mod = await import("../src/config.js");
+    const cfg = base();
+    expect(mod.applyDirectoryOverride(cfg, `${SHARED_HOME}/code/personal`)).toBe(cfg);
+  });
+
+  it("isIsolationCandidate is false for a prefix-covered dir, true for an uncovered one", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspaceRules: [{ cwdPrefix: "~/code/work", workspace: "Work" }],
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.isIsolationCandidate(`${WORK}/repo`)).toBe(false);
+    expect(mod.isIsolationCandidate(`${SHARED_HOME}/code/personal`)).toBe(true);
+  });
+});
+
+describe("MCP per-directory resolution (getLastActiveCwd + applyDirectoryOverride)", () => {
+  // The MCP server is one long-lived process that can serve tool calls for
+  // several project directories over its lifetime. Unlike the hooks, it has no
+  // per-call cwd from a hook input, so it resolves the active directory via
+  // getLastActiveCwd() and re-applies the override on EVERY request (see
+  // src/mcp/server.ts). These tests pin that composition — the piece that
+  // closes the "MCP writes attribute to the global workspace/aiPeer while the
+  // hooks use the per-directory one" gap: the resolved workspace/aiPeer must
+  // follow whichever directory is currently most-recently-active, and must
+  // re-resolve per call rather than cache a value from server startup.
+  const WORK = "/Users/alice/work-project";
+  const SIDE = "/Users/alice/side-project";
+
+  const baseConfig = () => ({
+    apiKey: "hch-global-key",
+    peerName: "user",
+    workspace: "global-ws",
+    aiPeer: "claude",
+  } as import("../src/config.js").HonchoCLAUDEConfig);
+
+  function writeBothOverrides() {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-global-key",
+      peerName: "user",
+      workspace: "global-ws",
+      aiPeer: "claude",
+      directoryWorkspaces: {
+        [WORK]: { workspace: "Work", aiPeer: "work-claude" },
+        [SIDE]: { workspace: "Side", aiPeer: "side-claude" },
+      },
+    });
+  }
+
+  // Drive the REAL resolution the MCP request handler uses, so a regression in
+  // server.ts (e.g. resolving the override once at startup) trips these tests.
+  async function resolveActive() {
+    const { resolveActiveDirConfig } = await import("../src/mcp/server.js");
+    return resolveActiveDirConfig(baseConfig()).config;
+  }
+
+  it("routes an MCP call to the workspace/aiPeer of the currently-active directory", async () => {
+    writeBothOverrides();
+    const cache = await import("../src/cache.js");
+    cache.setCachedSessionId(WORK, "sess-work", "id-work");
+    await new Promise((r) => setTimeout(r, 10));
+    cache.setCachedSessionId(SIDE, "sess-side", "id-side");
+
+    // SIDE is the most-recently-active directory → its override wins.
+    const resolved = await resolveActive();
+    expect(resolved.workspace).toBe("Side");
+    expect(resolved.aiPeer).toBe("side-claude");
+  });
+
+  it("re-resolves per call: attribution follows the active dir when it changes", async () => {
+    writeBothOverrides();
+    const cache = await import("../src/cache.js");
+    cache.setCachedSessionId(WORK, "sess-work", "id-work");
+    await new Promise((r) => setTimeout(r, 10));
+    cache.setCachedSessionId(SIDE, "sess-side", "id-side");
+    expect((await resolveActive()).workspace).toBe("Side");
+
+    // A new tool call lands in the WORK session, refreshing its cache entry, so
+    // WORK becomes most-recently-active. A server that resolved the override
+    // once at startup would still say "Side" here; re-resolving per call flips
+    // it to "Work". This assertion is the regression guard for that gap.
+    await new Promise((r) => setTimeout(r, 10));
+    cache.setCachedSessionId(WORK, "sess-work", "id-work");
+    const reresolved = await resolveActive();
+    expect(reresolved.workspace).toBe("Work");
+    expect(reresolved.aiPeer).toBe("work-claude");
+  });
+
+  it("falls back to the global workspace/aiPeer when the active dir has no override entry", async () => {
+    // Only WORK is mapped; the active directory is SIDE.
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-global-key",
+      peerName: "user",
+      workspace: "global-ws",
+      aiPeer: "claude",
+      directoryWorkspaces: {
+        [WORK]: { workspace: "Work", aiPeer: "work-claude" },
+      },
+    });
+    const cache = await import("../src/cache.js");
+    cache.setCachedSessionId(SIDE, "sess-side", "id-side");
+    const resolved = await resolveActive();
+    expect(resolved.workspace).toBe("global-ws");
+    expect(resolved.aiPeer).toBe("claude");
+  });
+});
+
 describe("getHonchoClientOptions SDK timeout (issue #25)", () => {
   // getHonchoClientOptions only reads apiKey + workspace (+ endpoint).
   const baseConfig = {
@@ -301,5 +645,241 @@ describe("getHonchoClientOptions SDK timeout (issue #25)", () => {
     process.env.HONCHO_SDK_TIMEOUT_MS = "not-a-number";
     const { getHonchoClientOptions } = await import("../src/config.js");
     expect(getHonchoClientOptions(baseConfig).timeout).toBe(8000);
+  });
+});
+
+describe("deriveWorkspaceName", () => {
+  it("returns the basename of a directory path", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("/Users/alice/work-project")).toBe("work-project");
+  });
+
+  it("ignores a trailing slash", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("/Users/alice/work-project/")).toBe("work-project");
+  });
+
+  it("returns a single segment path unchanged", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("/single")).toBe("single");
+  });
+
+  it("returns empty string for the filesystem root", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("/")).toBe("");
+  });
+
+  it("returns empty string for an empty path", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.deriveWorkspaceName("")).toBe("");
+  });
+});
+
+describe("isAutoIsolateEnabled", () => {
+  it("is true when autoIsolate is set to true", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user", autoIsolate: true });
+    const mod = await import("../src/config.js");
+    expect(mod.isAutoIsolateEnabled()).toBe(true);
+  });
+
+  it("is false when autoIsolate is false", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user", autoIsolate: false });
+    const mod = await import("../src/config.js");
+    expect(mod.isAutoIsolateEnabled()).toBe(false);
+  });
+
+  it("is false when autoIsolate is absent", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    expect(mod.isAutoIsolateEnabled()).toBe(false);
+  });
+
+  it("is false when no config file exists", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.isAutoIsolateEnabled()).toBe(false);
+  });
+});
+
+describe("isIsolationCandidate", () => {
+  it("is true for a directory with no directoryWorkspaces entry", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    expect(mod.isIsolationCandidate("/Users/alice/new-project")).toBe(true);
+  });
+
+  it("is false when the directory already has an entry", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: { "/Users/alice/new-project": { workspace: "New" } },
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.isIsolationCandidate("/Users/alice/new-project")).toBe(false);
+  });
+
+  it("is true when only an unrelated directory has an entry", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: { "/Users/alice/other": { workspace: "Other" } },
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.isIsolationCandidate("/Users/alice/new-project")).toBe(true);
+  });
+
+  it("is false when a workspaceRules prefix covers the directory", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspaceRules: [{ cwdPrefix: "/Users/alice", workspace: "Alice" }],
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.isIsolationCandidate("/Users/alice/new-project")).toBe(false);
+  });
+
+  it("is false for an empty cwd", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    expect(mod.isIsolationCandidate("")).toBe(false);
+  });
+
+  it("is false when no config file exists", async () => {
+    const mod = await import("../src/config.js");
+    expect(mod.isIsolationCandidate("/Users/alice/new-project")).toBe(false);
+  });
+});
+
+describe("resolveIsolationAction", () => {
+  it("returns none when the directory is already isolated (exact entry)", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      directoryWorkspaces: { "/Users/alice/work-project": { workspace: "Work" } },
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.resolveIsolationAction("/Users/alice/work-project").action).toBe("none");
+  });
+
+  it("returns none when a workspaceRules prefix already covers the directory", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      workspaceRules: [{ cwdPrefix: "/Users/alice/work-project", workspace: "Work" }],
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.resolveIsolationAction("/Users/alice/work-project").action).toBe("none");
+  });
+
+  it("returns auto with a derived workspace when autoIsolate is on", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user", autoIsolate: true });
+    const mod = await import("../src/config.js");
+    const result = mod.resolveIsolationAction("/Users/alice/work-project");
+    expect(result.action).toBe("auto");
+    expect(result.workspace).toBe("work-project");
+  });
+
+  it("nudges a fresh candidate and KEEPS nudging on the next session (no shown-once gate)", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    const first = mod.resolveIsolationAction("/Users/alice/work-project");
+    expect(first.action).toBe("nudge");
+    expect(first.workspace).toBe("work-project");
+    // A later session must STILL nudge — the retired shown-once gate returned "none" here.
+    expect(mod.resolveIsolationAction("/Users/alice/work-project").action).toBe("nudge");
+  });
+
+  it("returns none for a directory the user explicitly kept pooled", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      keepPooled: ["/Users/alice/work-project"],
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.resolveIsolationAction("/Users/alice/work-project").action).toBe("none");
+  });
+
+  it("honors keep-pooled over autoIsolate (explicit decline is terminal)", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      autoIsolate: true,
+      keepPooled: ["/Users/alice/work-project"],
+    });
+    const mod = await import("../src/config.js");
+    expect(mod.resolveIsolationAction("/Users/alice/work-project").action).toBe("none");
+  });
+
+  it("returns none when the workspace name cannot be derived", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user", autoIsolate: true });
+    const mod = await import("../src/config.js");
+    expect(mod.resolveIsolationAction("/").action).toBe("none");
+  });
+});
+
+describe("isolateDirectory", () => {
+  it("writes a directoryWorkspaces entry for the directory", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    mod.isolateDirectory("/Users/alice/work-project", "work-project");
+    expect(readRawConfig().directoryWorkspaces["/Users/alice/work-project"]).toEqual({ workspace: "work-project" });
+  });
+
+  it("preserves existing directoryWorkspaces entries and other top-level keys", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      sessions: { "/x": "sess-x" },
+      hosts: { claude_code: { workspace: "claude_code" } },
+      directoryWorkspaces: { "/Users/alice/other": { workspace: "Other" } },
+    });
+    const mod = await import("../src/config.js");
+    mod.isolateDirectory("/Users/alice/work-project", "work-project");
+    const raw = readRawConfig();
+    expect(raw.directoryWorkspaces["/Users/alice/other"]).toEqual({ workspace: "Other" });
+    expect(raw.directoryWorkspaces["/Users/alice/work-project"]).toEqual({ workspace: "work-project" });
+    expect(raw.sessions).toEqual({ "/x": "sess-x" });
+    expect(raw.hosts.claude_code.workspace).toBe("claude_code");
+    expect(raw.apiKey).toBe("hch-key");
+  });
+
+  it("is a no-op when cwd or workspace is empty", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    mod.isolateDirectory("", "work-project");
+    mod.isolateDirectory("/Users/alice/work-project", "");
+    expect(readRawConfig().directoryWorkspaces).toBeUndefined();
+  });
+});
+
+describe("keepDirectoryPooled / wasKeptPooled", () => {
+  it("records an explicit keep-pooled decision and reads it back", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    expect(mod.wasKeptPooled("/Users/alice/work-project")).toBe(false);
+    mod.keepDirectoryPooled("/Users/alice/work-project");
+    expect(mod.wasKeptPooled("/Users/alice/work-project")).toBe(true);
+    expect(readRawConfig().keepPooled).toEqual(["/Users/alice/work-project"]);
+  });
+
+  it("does not add a duplicate entry and preserves other top-level keys", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      sessions: { "/x": "sess-x" },
+      keepPooled: ["/Users/alice/work-project"],
+    });
+    const mod = await import("../src/config.js");
+    mod.keepDirectoryPooled("/Users/alice/work-project");
+    const raw = readRawConfig();
+    expect(raw.keepPooled).toEqual(["/Users/alice/work-project"]);
+    expect(raw.sessions).toEqual({ "/x": "sess-x" });
+    expect(raw.apiKey).toBe("hch-key");
+  });
+
+  it("is a no-op for an empty cwd", async () => {
+    writeHonchoConfig(honchoDir, { apiKey: "hch-key", peerName: "user" });
+    const mod = await import("../src/config.js");
+    mod.keepDirectoryPooled("");
+    expect(readRawConfig().keepPooled).toBeUndefined();
   });
 });

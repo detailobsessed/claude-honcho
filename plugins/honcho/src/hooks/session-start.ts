@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, readsAsUnified, writesAsDirectional } from "../config.js";
+import { loadConfig, getSessionForPath, setSessionForPath, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, readsAsUnified, writesAsDirectional, applyDirectoryOverride, resolveIsolationAction, isolateDirectory } from "../config.js";
 import {
   setCachedUserContext,
   setCachedSessionId,
@@ -27,7 +27,7 @@ interface HookInput {
 }
 
 export async function handleSessionStart(): Promise<void> {
-  const config = loadConfig();
+  let config = loadConfig();
   if (!config) {
     console.error("[honcho] Not configured. Run: honcho init");
     process.exit(1);
@@ -49,6 +49,32 @@ export async function handleSessionStart(): Promise<void> {
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  config = applyDirectoryOverride(config, cwd);
+
+  // Directory isolation: a directory covered by neither an exact
+  // directoryWorkspaces entry nor a workspaceRules prefix is still pooling into
+  // the global workspace. With autoIsolate on we create the entry silently (and
+  // re-apply so THIS session uses it); otherwise we nudge — every session until
+  // the user decides (isolate, add a prefix rule, or keep it pooled).
+  const isolation = resolveIsolationAction(cwd);
+  if (isolation.action === "auto") {
+    isolateDirectory(cwd, isolation.workspace);
+    config = applyDirectoryOverride(config, cwd);
+    logHook("session-start", `auto-isolated ${cwd} → workspace ${isolation.workspace}`);
+    console.log(JSON.stringify({
+      systemMessage: `[honcho] auto-isolated this project into workspace "${isolation.workspace}"`,
+    }));
+  } else if (isolation.action === "nudge") {
+    const nudge = `New project pooling memory into workspace "${config.workspace}". Give it its own memory by `
+      + `isolating just this dir (add a "directoryWorkspaces" entry, suggested workspace: "${isolation.workspace}"), `
+      + `routing its whole parent tree (add a "workspaceRules" prefix), or set "autoIsolate": true — all in `
+      + `~/.honcho/config.json. To keep it pooled and stop this notice, use the honcho keep-pooled action.`;
+    console.log(JSON.stringify({
+      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: `[honcho] ${nudge}` },
+      systemMessage: `[honcho] ${nudge}`,
+    }));
+  }
+
   const claudeInstanceId = hookInput.session_id;
 
   // Store Claude's instance ID for parallel session support
@@ -229,7 +255,7 @@ export async function handleSessionStart(): Promise<void> {
     // Cache results for user-prompt hook
     if (userContextResult.status === "fulfilled" && userContextResult.value) {
       const context = userContextResult.value as any;
-      setCachedUserContext(context);
+      setCachedUserContext(config.workspace, context);
       const rep = context.representation;
       const count = typeof rep === "string" ? rep.split("\n").filter((l: string) => l.trim() && !l.startsWith("#")).length : 0;
       logCache("write", "userContext", `${count} conclusions`);

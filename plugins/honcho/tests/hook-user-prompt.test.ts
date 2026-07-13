@@ -101,7 +101,7 @@ describe("user-prompt hook", () => {
 
   test("skips the upload when saveMessages is false but still serves fresh cached context", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig({ saveMessages: false }));
-    setCachedUserContext({
+    setCachedUserContext("test-ws", {
       representation: "- likes TypeScript\n- works on the honcho plugin",
       peerCard: ["Senior engineer"],
     });
@@ -253,7 +253,7 @@ describe("user-prompt hook: harness turns (#66)", () => {
 
   test("a task-notification is neither uploaded nor spends a context fetch", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
-    setCachedUserContext({ representation: "- likes TypeScript", peerCard: ["Engineer"] });
+    setCachedUserContext("test-ws", { representation: "- likes TypeScript", peerCard: ["Engineer"] });
     cacheStdin(
       JSON.stringify({
         session_id: "s1",
