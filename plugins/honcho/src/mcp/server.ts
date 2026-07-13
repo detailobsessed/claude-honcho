@@ -25,6 +25,11 @@ import {
   type StatuslineMode,
   getObservationMode,
   readsAsUnified,
+  applyDirectoryOverride,
+  resolveIsolationAction,
+  isAutoIsolateEnabled,
+  keepDirectoryPooled,
+  type HonchoCLAUDEConfig,
 } from "../config.js";
 import { honchoSessionUrl } from "../styles.js";
 import {
@@ -82,8 +87,31 @@ function renderCard(rows: [string, string][], title: string): string {
   return [top, blank, ...body, blank, bot].join("\n");
 }
 
+/**
+ * Resolve the active project directory and apply its per-directory override.
+ *
+ * The MCP server is a single long-lived process that serves tool calls for
+ * many directories over its lifetime, so it has no per-call cwd from a hook
+ * input. It falls back to the most-recently-active session directory
+ * (getLastActiveCwd) and MUST re-resolve on every request rather than caching
+ * a value from startup — otherwise in-session MCP writes would attribute to
+ * the wrong directory's workspace/aiPeer. Exported so this resolution can be
+ * pinned in tests without driving the whole stdio server.
+ *
+ * `config` in the result is `applyDirectoryOverride`'s return, which is the
+ * exact same reference as the input when no override matches — callers use
+ * `result.config === config` to reuse the startup Honcho client.
+ */
+export function resolveActiveDirConfig(
+  config: HonchoCLAUDEConfig,
+): { cwd: string; config: HonchoCLAUDEConfig } {
+  const cwd = getLastActiveCwd() || process.cwd();
+  return { cwd, config: applyDirectoryOverride(config, cwd) };
+}
+
 function handleGetConfig(cwd: string) {
-  const cfg = loadConfig();
+  let cfg = loadConfig();
+  if (cfg) cfg = applyDirectoryOverride(cfg, cwd);
   const host = getDetectedHost();
   const cfgPath = getConfigPath();
   const cfgExists = configExists();
@@ -222,10 +250,19 @@ function handleGetConfig(cwd: string) {
     ["obs mode", cfg.observationMode ?? "unified"],
   ], "current honcho config") : null;
 
+  // Directory isolation status — what a fresh SessionStart would do for this
+  // cwd. Read-only here; the actual write happens in the SessionStart hook.
+  const isoAction = resolveIsolationAction(cwd);
+  const isolation = {
+    autoIsolate: isAutoIsolateEnabled(),
+    action: isoAction.action,
+    suggestedWorkspace: isoAction.workspace || null,
+  };
+
   return {
     content: [{
       type: "text",
-      text: JSON.stringify({ card, resolved, current, host: hostInfo, warnings, configPath: cfgPath, configExists: cfgExists }, null, 2),
+      text: JSON.stringify({ card, resolved, current, host: hostInfo, warnings, isolation, configPath: cfgPath, configExists: cfgExists }, null, 2),
     }],
   };
 }
@@ -277,6 +314,10 @@ function handleSetConfig(args: Record<string, unknown>) {
   }
 
   let previousValue: unknown;
+  // Echoed back to the caller. Defaults to the raw input, but a case that
+  // coerces before persisting should overwrite it so the response reflects
+  // what was actually saved (e.g. boolean true, not the string "true").
+  let newValue: unknown = value;
   let cacheInvalidation: { cleared: string[]; reason: string } | null = null;
   const warnings: string[] = [];
 
@@ -368,6 +409,13 @@ function handleSetConfig(args: Record<string, unknown>) {
       cfg.globalOverride = Boolean(value);
       // globalOverride is a root-level flag — write to root (user-directed)
       saveRootField("globalOverride", cfg.globalOverride);
+      break;
+
+    case "autoIsolate":
+      previousValue = isAutoIsolateEnabled();
+      newValue = Boolean(value);
+      // autoIsolate is a root-level flag — write to root (user-directed)
+      saveRootField("autoIsolate", newValue);
       break;
 
     case "enabled":
@@ -534,7 +582,7 @@ function handleSetConfig(args: Record<string, unknown>) {
         success: true,
         field,
         previousValue,
-        newValue: value,
+        newValue,
         cacheInvalidation,
         restartWarning,
         sessionUrl,
@@ -707,6 +755,7 @@ export async function runMcpServer(): Promise<void> {
                   "aiPeer",
                   "workspace",
                   "globalOverride",
+                  "autoIsolate",
                   "endpoint.environment",
                   "endpoint.baseUrl",
                   "sessionStrategy",
@@ -738,6 +787,14 @@ export async function runMcpServer(): Promise<void> {
             required: ["field", "value"],
           },
         },
+        {
+          name: "keep_pooled",
+          description: "Keep the current project pooled in the global workspace and stop the isolation nudge for it. Records an explicit, terminal 'keep pooled' decision for this directory (the nudge otherwise reappears every session until you decide).",
+          inputSchema: {
+            type: "object",
+            properties: {},
+          },
+        },
       ],
     };
   });
@@ -745,7 +802,14 @@ export async function runMcpServer(): Promise<void> {
   // Handle tool calls
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const cwd = getLastActiveCwd() || process.cwd();
+
+    // Per-directory workspace override, re-resolved on every call — see
+    // resolveActiveDirConfig for why the MCP path can't cache this. Its
+    // returned config is the same reference as `config` when no override
+    // matches, so requestConfig === config detects the no-op case and reuses
+    // the startup Honcho client instead of constructing a new one.
+    const { cwd, config: requestConfig } = resolveActiveDirConfig(config);
+    const requestHoncho = requestConfig === config ? honcho : new Honcho(getHonchoClientOptions(requestConfig));
 
     // ── Config tools (no Honcho session needed) ──
 
@@ -757,17 +821,32 @@ export async function runMcpServer(): Promise<void> {
       return handleSetConfig(args as Record<string, unknown>);
     }
 
+    if (name === "keep_pooled") {
+      keepDirectoryPooled(cwd);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            cwd,
+            keptPooled: true,
+            message: `Keeping "${cwd}" pooled in workspace "${requestConfig.workspace}". The isolation nudge is now silenced for this directory.`,
+          }, null, 2),
+        }],
+      };
+    }
+
     // ── Peer-only tools (no session needed) ──
 
     if (name === "list_conclusions" || name === "delete_conclusion") {
       try {
-        const observationMode = getObservationMode(config);
+        const observationMode = getObservationMode(requestConfig);
         // unified & hybrid read from the user's self-spine (observer=user,
         // observed=user); directional reads the AI peer's view (observer=aiPeer).
         const scopePeer = readsAsUnified(observationMode)
-          ? await honcho.peer(config.peerName)
-          : await honcho.peer(config.aiPeer);
-        const conclusionScope = scopePeer.conclusionsOf(config.peerName);
+          ? await requestHoncho.peer(requestConfig.peerName)
+          : await requestHoncho.peer(requestConfig.aiPeer);
+        const conclusionScope = scopePeer.conclusionsOf(requestConfig.peerName);
 
         if (name === "list_conclusions") {
           const page = (args?.page as number) ?? 1;
@@ -805,17 +884,17 @@ export async function runMcpServer(): Promise<void> {
     const sessionName = getSessionName(cwd);
 
     try {
-      const session = await honcho.session(sessionName);
-      const observationMode = getObservationMode(config);
+      const session = await requestHoncho.session(sessionName);
+      const observationMode = getObservationMode(requestConfig);
       const useSelfSpineRead = readsAsUnified(observationMode);
 
       // unified & hybrid: reads come from the self-spine — all ops go through userPeer.
       // directional: aiPeer observes user — ops use aiPeer with target.
-      const userPeer = await honcho.peer(config.peerName);
-      const aiPeer = !useSelfSpineRead ? await honcho.peer(config.aiPeer) : null;
+      const userPeer = await requestHoncho.peer(requestConfig.peerName);
+      const aiPeer = !useSelfSpineRead ? await requestHoncho.peer(requestConfig.aiPeer) : null;
       const activePeer = useSelfSpineRead ? userPeer : aiPeer!;
-      const chatTarget = useSelfSpineRead ? undefined : config.peerName;
-      const contextTarget = useSelfSpineRead ? undefined : config.peerName;
+      const chatTarget = useSelfSpineRead ? undefined : requestConfig.peerName;
+      const contextTarget = useSelfSpineRead ? undefined : requestConfig.peerName;
 
       switch (name) {
         case "search": {
@@ -824,7 +903,7 @@ export async function runMcpServer(): Promise<void> {
           const scope = (args?.scope as string) ?? "session";
 
           const messages = scope === "workspace"
-            ? await honcho.search(query, { limit })
+            ? await requestHoncho.search(query, { limit })
             : await session.search(query, { limit });
 
           const results = messages.map((msg: any) => ({
@@ -845,7 +924,7 @@ export async function runMcpServer(): Promise<void> {
 
         case "chat": {
           const query = args?.query as string;
-          const reasoningLevel = (args?.reasoning_level as string) ?? config.reasoningLevel ?? "medium";
+          const reasoningLevel = (args?.reasoning_level as string) ?? requestConfig.reasoningLevel ?? "medium";
 
           const response = await activePeer.chat(query, {
             ...(chatTarget ? { target: chatTarget } : {}),
@@ -866,7 +945,7 @@ export async function runMcpServer(): Promise<void> {
         case "create_conclusion": {
           const content = args?.content as string;
 
-          const conclusions = await activePeer.conclusionsOf(config.peerName).create({
+          const conclusions = await activePeer.conclusionsOf(requestConfig.peerName).create({
             content,
             sessionId: session.id,
           });

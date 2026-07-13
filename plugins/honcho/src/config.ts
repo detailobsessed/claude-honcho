@@ -166,6 +166,36 @@ export async function initHook(): Promise<void> {
 // Config Types
 // ============================================
 
+/** Per-directory workspace override entry */
+export interface DirectoryWorkspaceConfig {
+  /** Honcho workspace name for this directory */
+  workspace: string;
+  /** API key for this workspace (if different from global) */
+  apiKey?: string;
+  /** AI peer name for this directory (if different from host default) */
+  aiPeer?: string;
+  /** Endpoint override for this directory */
+  endpoint?: HonchoEndpointConfig;
+}
+
+/**
+ * A cwd-prefix workspace routing rule. Where `directoryWorkspaces` pins one
+ * exact directory, a rule routes a whole subtree: any directory at or under
+ * `cwdPrefix` uses `workspace`. Lets you set up "~/code/work → work" once and
+ * have every repo under it isolate automatically — no per-directory entry.
+ */
+export interface WorkspaceRule {
+  /** Directory prefix that triggers this rule. Leading `~` expands to $HOME.
+   *  Matched path-segment-aware (a prefix of the path, not a substring), so
+   *  "~/code/work" matches "~/code/work" and "~/code/work/x" but NOT
+   *  "~/code/work-old". */
+  cwdPrefix: string;
+  /** Workspace to use when this rule matches. */
+  workspace: string;
+  /** AI peer override for this subtree (parity with DirectoryWorkspaceConfig). */
+  aiPeer?: string;
+}
+
 /** Raw shape of ~/.honcho/config.json on disk */
 interface HonchoFileConfig {
   apiKey?: string;
@@ -173,6 +203,47 @@ interface HonchoFileConfig {
   workspace?: string;
   aiPeer?: string;
   sessions?: Record<string, string>;
+  /**
+   * Per-directory workspace overrides.
+   * Key: absolute directory path (matching workspace_roots[0] or cwd from hook input).
+   * Value: workspace + optional apiKey/aiPeer/endpoint overrides.
+   * Takes precedence over hosts.<host>.workspace for the matching directory.
+   *
+   * Example:
+   *   "directoryWorkspaces": {
+   *     "/Users/you/project-alpha": { "workspace": "project_alpha", "apiKey": "<alpha-jwt>" },
+   *     "/Users/you/project-beta":  { "workspace": "project_beta",  "apiKey": "<beta-jwt>" }
+   *   }
+   */
+  directoryWorkspaces?: Record<string, DirectoryWorkspaceConfig>;
+  /**
+   * cwd-prefix workspace routing rules. Each rule maps a directory prefix to a
+   * workspace, so one rule covers a whole subtree. Checked when no exact
+   * `directoryWorkspaces` entry matches; the longest matching prefix wins.
+   *
+   * Example:
+   *   "workspaceRules": [
+   *     { "cwdPrefix": "~/code/work",     "workspace": "work" },
+   *     { "cwdPrefix": "~/code/personal", "workspace": "personal" }
+   *   ]
+   */
+  workspaceRules?: WorkspaceRule[];
+  /**
+   * When true, SessionStart auto-creates a `directoryWorkspaces` entry for any
+   * uncovered directory (deriving the workspace name from the dir). When
+   * false/absent, an uncovered directory is nudged every session until the
+   * user decides.
+   */
+  autoIsolate?: boolean;
+  /**
+   * Directories the user explicitly chose to keep pooled in the global
+   * workspace. A terminal decision — set only by a user gesture (the
+   * keep-pooled MCP action), never by SessionStart — that silences the nudge
+   * for that directory. Distinct from "we showed the nudge": ignoring the
+   * nudge does NOT land a directory here, so the nudge keeps reappearing until
+   * the user actually decides.
+   */
+  keepPooled?: string[];
   saveMessages?: boolean;
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
@@ -763,4 +834,196 @@ export function setEndpoint(environment?: HonchoEnvironment, baseUrl?: string): 
   if (environment && !VALID_ENVIRONMENTS.has(environment)) return;
   config.endpoint = { environment, baseUrl };
   saveConfig(config);
+}
+
+/** Expand a leading `~` / `~/…` to the home directory. */
+function expandHome(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+  return p;
+}
+
+/** Normalize a directory path for prefix comparison: backslashes → slashes,
+ *  strip trailing slashes. */
+function normalizeDirPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/**
+ * Resolve a cwd against prefix routing rules. Returns the matching rule, or
+ * null when none match. Path-segment-aware (a rule for "~/code/work" matches
+ * that dir and its subtree but not the sibling "~/code/work-old"). Among
+ * several matches the longest prefix wins; ties resolve to array order.
+ */
+export function resolveWorkspaceRule(cwd: string, rules?: WorkspaceRule[]): WorkspaceRule | null {
+  if (!cwd || !rules || rules.length === 0) return null;
+  const dir = normalizeDirPath(cwd);
+  let best: WorkspaceRule | null = null;
+  let bestLen = -1;
+  for (const rule of rules) {
+    const prefix = normalizeDirPath(expandHome(rule.cwdPrefix));
+    if (!prefix) continue; // an empty prefix would match every absolute path
+    if (dir === prefix || dir.startsWith(prefix + "/")) {
+      if (prefix.length > bestLen) {
+        best = rule;
+        bestLen = prefix.length;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The effective per-directory override for `cwd`, resolved most-specific first:
+ * an exact `directoryWorkspaces[cwd]` entry wins, else the longest matching
+ * `workspaceRules` prefix, else null (the directory is still pooling into the
+ * global workspace). Shared by applyDirectoryOverride and isIsolationCandidate
+ * so "covered" means the same thing to both.
+ */
+function resolveDirectoryOverride(
+  raw: HonchoFileConfig,
+  cwd: string,
+): { workspace: string; apiKey?: string; aiPeer?: string; endpoint?: HonchoEndpointConfig } | null {
+  if (!cwd) return null;
+  const exact = raw.directoryWorkspaces?.[cwd];
+  if (exact) return exact;
+  const rule = resolveWorkspaceRule(cwd, raw.workspaceRules);
+  if (rule) return { workspace: rule.workspace, aiPeer: rule.aiPeer };
+  return null;
+}
+
+/**
+ * Apply a per-directory workspace override to a resolved config.
+ * Resolves the directory via resolveDirectoryOverride (exact
+ * `directoryWorkspaces[cwd]` first, else a matching `workspaceRules` prefix)
+ * and patches workspace, apiKey, aiPeer, and endpoint when one applies.
+ * Returns a new object when an override applies; returns the exact same
+ * `config` reference (no clone) when none does, so callers can cheaply detect
+ * the no-op case with `===`. Safe on a missing/corrupt config file.
+ */
+export function applyDirectoryOverride(config: HonchoCLAUDEConfig, cwd: string): HonchoCLAUDEConfig {
+  if (!cwd || !configExists()) return config;
+  const raw = readRawConfigFile();
+  if (!raw) return config;
+  const override = resolveDirectoryOverride(raw, cwd);
+  if (!override) return config;
+  return {
+    ...config,
+    workspace: override.workspace,
+    apiKey: override.apiKey ?? config.apiKey,
+    aiPeer: override.aiPeer ?? config.aiPeer,
+    endpoint: override.endpoint ?? config.endpoint,
+  };
+}
+
+// ============================================
+// Directory isolation (nudge + autoIsolate)
+// ============================================
+
+/** Read the raw config file, or null if missing/corrupt. */
+function readRawConfigFile(): HonchoFileConfig | null {
+  if (!configExists()) return null;
+  try {
+    return JSON.parse(readFileSync(CONFIG_FILE, "utf-8")) as HonchoFileConfig;
+  } catch {
+    return null;
+  }
+}
+
+/** Read-merge-write a mutation into config.json, preserving all other keys. */
+function updateRawConfigFile(mutate: (raw: HonchoFileConfig) => void): void {
+  if (!existsSync(CONFIG_DIR)) {
+    mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  let existing: HonchoFileConfig = {};
+  if (existsSync(CONFIG_FILE)) {
+    try {
+      existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+    } catch {
+      // Start fresh if corrupt
+    }
+  }
+  mutate(existing);
+  writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+}
+
+/**
+ * Derive a workspace name from a directory path (its final segment).
+ * Returns "" when no meaningful segment exists (root or empty), so callers
+ * can skip directories they can't name.
+ */
+export function deriveWorkspaceName(cwd: string): string {
+  if (!cwd) return "";
+  const trimmed = cwd.replace(/\/+$/, "");
+  return trimmed.split("/").pop() ?? "";
+}
+
+/** True when `autoIsolate` is explicitly enabled in config.json. */
+export function isAutoIsolateEnabled(): boolean {
+  return readRawConfigFile()?.autoIsolate === true;
+}
+
+/**
+ * True when `cwd` is not covered by any override — neither an exact
+ * `directoryWorkspaces` entry nor a matching `workspaceRules` prefix — i.e. it
+ * is still pooling into the global workspace. A directory a prefix rule already
+ * routes is NOT a candidate, so the nudge never fires for it.
+ */
+export function isIsolationCandidate(cwd: string): boolean {
+  if (!cwd) return false;
+  const raw = readRawConfigFile();
+  if (!raw) return false;
+  return resolveDirectoryOverride(raw, cwd) === null;
+}
+
+/** True when the user explicitly chose to keep `cwd` pooled (terminal decline). */
+export function wasKeptPooled(cwd: string): boolean {
+  if (!cwd) return false;
+  return readRawConfigFile()?.keepPooled?.includes(cwd) ?? false;
+}
+
+export type IsolationAction = { action: "none" | "auto" | "nudge"; workspace: string };
+
+/**
+ * Decide what SessionStart should do for `cwd`:
+ *  - "none"  → already covered (exact entry or prefix rule), unnamable, or the
+ *             user explicitly kept it pooled
+ *  - "auto"  → autoIsolate is on: write the entry silently (workspace = derived)
+ *  - "nudge" → uncovered, autoIsolate off, not kept-pooled: nudge (every
+ *             session until the user decides — there is no shown-once gate)
+ *
+ * An explicit keep-pooled decision is terminal: it is honored before
+ * autoIsolate, so keep_pooled stays effective even with autoIsolate on.
+ */
+export function resolveIsolationAction(cwd: string): IsolationAction {
+  if (!isIsolationCandidate(cwd)) return { action: "none", workspace: "" };
+  const workspace = deriveWorkspaceName(cwd);
+  if (!workspace) return { action: "none", workspace: "" };
+  if (wasKeptPooled(cwd)) return { action: "none", workspace: "" };
+  if (isAutoIsolateEnabled()) return { action: "auto", workspace };
+  return { action: "nudge", workspace };
+}
+
+/**
+ * Write a `directoryWorkspaces[cwd] = { workspace }` entry, preserving all
+ * existing entries and other config keys. No-op if cwd or workspace is empty.
+ */
+export function isolateDirectory(cwd: string, workspace: string): void {
+  if (!cwd || !workspace) return;
+  updateRawConfigFile((raw) => {
+    if (!raw.directoryWorkspaces) raw.directoryWorkspaces = {};
+    raw.directoryWorkspaces[cwd] = { workspace };
+  });
+}
+
+/**
+ * Record the user's explicit decision to keep `cwd` pooled in the global
+ * workspace, which silences the isolation nudge for it. No-op if cwd empty.
+ */
+export function keepDirectoryPooled(cwd: string): void {
+  if (!cwd) return;
+  updateRawConfigFile((raw) => {
+    if (!raw.keepPooled) raw.keepPooled = [];
+    if (!raw.keepPooled.includes(cwd)) raw.keepPooled.push(cwd);
+  });
 }

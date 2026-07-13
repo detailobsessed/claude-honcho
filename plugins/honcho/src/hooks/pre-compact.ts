@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, readsAsUnified } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, readsAsUnified, applyDirectoryOverride } from "../config.js";
 import { Spinner } from "../spinner.js";
 import { setMemoryState } from "../state.js";
 import { logHook, logApiCall, setLogContext } from "../log.js";
@@ -86,7 +86,7 @@ When summarizing this conversation, ensure these conclusions are preserved.`);
 }
 
 export async function handlePreCompact(): Promise<void> {
-  const config = loadConfig();
+  let config = loadConfig();
   if (!config) {
     // No config, nothing to inject
     process.exit(0);
@@ -108,6 +108,7 @@ export async function handlePreCompact(): Promise<void> {
   }
 
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  config = applyDirectoryOverride(config, cwd);
   const trigger = hookInput.trigger || "auto";
 
   // Set log context

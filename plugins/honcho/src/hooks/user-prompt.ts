@@ -1,5 +1,5 @@
 import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, readsAsUnified, getEndpointInfo } from "../config.js";
+import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, getObservationMode, readsAsUnified, getEndpointInfo, applyDirectoryOverride } from "../config.js";
 import {
   getCachedUserContext,
   getStaleCachedUserContext,
@@ -127,7 +127,7 @@ function formatSessionLink(sessionUrl: string): string {
  * On no cache at all, exits silently — context will arrive next turn.
  */
 export async function handleUserPrompt(): Promise<void> {
-  const config = loadConfig();
+  let config = loadConfig();
   if (!config) {
     process.exit(0);
   }
@@ -148,6 +148,7 @@ export async function handleUserPrompt(): Promise<void> {
 
   const prompt = hookInput.prompt || "";
   const cwd = hookInput.workspace_roots?.[0] || hookInput.cwd || process.cwd();
+  config = applyDirectoryOverride(config, cwd);
   const instanceId = hookInput.session_id || getInstanceIdForCwd(cwd);
   const sessionName = getSessionName(cwd, instanceId || undefined);
 
@@ -256,8 +257,8 @@ export async function handleUserPrompt(): Promise<void> {
 
   // Decide whether to refresh: TTL expired or message threshold hit
   const forceRefresh = shouldRefreshKnowledgeGraph();
-  const cachedContext = getCachedUserContext();
-  const cacheIsStale = isContextCacheStale();
+  const cachedContext = getCachedUserContext(config.workspace);
+  const cacheIsStale = isContextCacheStale(config.workspace);
 
   if (cachedContext && !cacheIsStale && !forceRefresh) {
     // Fresh cache — serve instantly, no API call
@@ -289,7 +290,7 @@ export async function handleUserPrompt(): Promise<void> {
   }
 
   // Fetch failed or timed out — silently fall back to stale cache
-  const staleContext = getStaleCachedUserContext();
+  const staleContext = getStaleCachedUserContext(config.workspace);
   if (staleContext) {
     logHook("user-prompt", "Serving stale cache after timeout");
     serveContext(config.peerName, staleContext, true, instanceId || "", sessionLink);
@@ -366,7 +367,7 @@ async function fetchFreshContext(config: any, prompt: string, honcho: Honcho): P
   }
 
   if (contextResult) {
-    setCachedUserContext(contextResult);
+    setCachedUserContext(config.workspace, contextResult);
     verboseApiResult("peer.context() -> representation (fresh)", (contextResult as any).representation);
     verboseList("peer.context() -> peerCard (fresh)", (contextResult as any).peerCard);
   }
