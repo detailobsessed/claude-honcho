@@ -1,6 +1,15 @@
 import { homedir } from "os";
 import { join, basename } from "path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  openSync,
+  closeSync,
+  unlinkSync,
+  statSync,
+} from "fs";
 import { createHash } from "crypto";
 import { captureGitState } from "./git.js";
 import { getInstanceIdForCwd, getClaudeInstanceId } from "./cache.js";
@@ -334,6 +343,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
 
 const CONFIG_DIR = join(homedir(), ".honcho");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+const CONFIG_LOCK = join(CONFIG_DIR, "config.json.lock");
 
 export function getConfigDir(): string {
   return CONFIG_DIR;
@@ -962,21 +972,71 @@ function readRawConfigFile(): HonchoFileConfig | null {
   }
 }
 
-/** Read-merge-write a mutation into config.json, preserving all other keys. */
-function updateRawConfigFile(mutate: (raw: HonchoFileConfig) => void): void {
+/**
+ * Serialize read-modify-write of config.json across processes. Session-start
+ * hooks run in separate processes, so two concurrent auto-isolations (or an MCP
+ * keep_pooled update racing a hook) would otherwise read the same file and the
+ * second write would silently drop the first's directoryWorkspaces entry.
+ * Best-effort: a crashed holder's stale lock is broken after STALE_MS, and if
+ * the lock can't be taken within TIMEOUT_MS we proceed unlocked rather than
+ * hang a short-lived hook. Mirrors withContextCacheLock in cache.ts.
+ */
+function withConfigLock<T>(fn: () => T): T {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
   }
-  let existing: HonchoFileConfig = {};
-  if (existsSync(CONFIG_FILE)) {
+  const STALE_MS = 5000;
+  const TIMEOUT_MS = 3000;
+  const start = Date.now();
+  let fd: number | null = null;
+  while (fd === null) {
     try {
-      existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+      fd = openSync(CONFIG_LOCK, "wx");
+      break;
     } catch {
-      // Start fresh if corrupt
+      // Couldn't take the lock. If a stale holder left it behind, break it;
+      // any other failure (lock vanished, or EACCES/EROFS/EMFILE) falls through
+      // to the timeout guard below so we can never spin forever.
+      try {
+        if (Date.now() - statSync(CONFIG_LOCK).mtimeMs > STALE_MS) {
+          unlinkSync(CONFIG_LOCK);
+        }
+      } catch {
+        // fall through to the timeout guard
+      }
+      if (Date.now() - start > TIMEOUT_MS) return fn(); // give up; best-effort unlocked
+      Bun.sleepSync(15);
     }
   }
-  mutate(existing);
-  writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    try {
+      unlinkSync(CONFIG_LOCK);
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/** Read-merge-write a mutation into config.json, preserving all other keys. */
+function updateRawConfigFile(mutate: (raw: HonchoFileConfig) => void): void {
+  withConfigLock(() => {
+    if (!existsSync(CONFIG_DIR)) {
+      mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    let existing: HonchoFileConfig = {};
+    if (existsSync(CONFIG_FILE)) {
+      try {
+        existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+      } catch {
+        // Start fresh if corrupt
+      }
+    }
+    mutate(existing);
+    writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+  });
 }
 
 /**
