@@ -8,7 +8,7 @@
 import { describe, expect, it, beforeAll, beforeEach, afterEach, afterAll } from "bun:test";
 import { clearSharedHonchoDir, SHARED_HONCHO_DIR, SHARED_HOME } from "./setup";
 import { writeHonchoConfig } from "./helpers";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
 const honchoDir = SHARED_HONCHO_DIR;
@@ -256,6 +256,24 @@ describe("saveConfig unknown-field preservation (upstream #29)", () => {
 
     const raw = readRawConfig();
     expect(raw.hosts.claude_code.linkedHosts).toEqual(["obsidian"]);
+  });
+
+  it("releases the config lock after writing", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      hosts: { claude_code: { workspace: "ws" } },
+    });
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+
+    const config = mod.loadConfig();
+    config!.workspace = "ws2";
+    mod.saveConfig(config!);
+
+    // The lockfile withConfigLock takes must be gone once saveConfig returns,
+    // otherwise the next writer waits out the stale-lock timeout.
+    expect(existsSync(join(honchoDir, "config.json.lock"))).toBe(false);
   });
 });
 

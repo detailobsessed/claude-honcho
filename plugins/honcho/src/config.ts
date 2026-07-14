@@ -590,94 +590,96 @@ function mergeWithEnvVars(config: HonchoCLAUDEConfig): HonchoCLAUDEConfig {
  *
  * resolveConfig() reads host block first, falls back to root, so the
  * user's root-level defaults still apply until overridden per-host.
+ *
+ * The read-merge-write runs under withConfigLock so a concurrent hook or
+ * MCP write to config.json can't clobber this host block (and vice versa),
+ * the same guarantee updateRawConfigFile relies on.
  */
 export function saveConfig(config: HonchoCLAUDEConfig): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
-  }
-
-  // Re-read from disk to avoid clobbering other tools' changes
-  let existing: HonchoFileConfig = {};
-  if (existsSync(CONFIG_FILE)) {
-    try {
-      existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
-    } catch {
-      // Start fresh if corrupt
+  withConfigLock(() => {
+    // Re-read from disk to avoid clobbering other tools' changes
+    let existing: HonchoFileConfig = {};
+    if (existsSync(CONFIG_FILE)) {
+      try {
+        existing = JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+      } catch {
+        // Start fresh if corrupt
+      }
     }
-  }
 
-  // Sessions are shared across hosts -- write at root
-  if (config.sessions !== undefined) {
-    existing.sessions = config.sessions;
-  }
-
-  // Everything else goes in the host block.
-  // Keep workspace/aiPeer host-local, but avoid materializing root defaults
-  // into new host overrides. This preserves root fallback behavior.
-  const host = getDetectedHost();
-  if (!existing.hosts) existing.hosts = {};
-  const hosts = existing.hosts;
-  const existingHost: HostConfigOnDisk = getHostBlock(hosts, host) ?? {};
-
-  // Seed with unknown fields from host aliases so the write below doesn't
-  // strip user-added config the plugin doesn't parse (e.g. `linkedHosts`).
-  // Alias entries are copied first so canonical host fields win conflicts.
-  const hostEntry: HostConfigOnDisk = {};
-  for (const hostKey of [...getHostConfigKeys(host)].reverse()) {
-    copyUnknownHostFields(hostEntry, hosts[hostKey]);
-  }
-
-  const setHostIfExplicit = <K extends keyof HostConfig>(
-    key: K,
-    value: HostConfig[K],
-    rootValue: unknown
-  ) => {
-    if (value === undefined) return;
-    const hasHostOverride = Object.hasOwn(existingHost, key);
-    if (hasHostOverride || !deepEqual(value, rootValue)) {
-      setKnownHostField(hostEntry, key, value);
+    // Sessions are shared across hosts -- write at root
+    if (config.sessions !== undefined) {
+      existing.sessions = config.sessions;
     }
-  };
 
-  // Only persist workspace/aiPeer to host block if the block already had them
-  // or if they differ from the default for this host.  This prevents root
-  // fallback values from being materialized into host overrides.
-  setHostIfExplicit("workspace", config.workspace, existing.workspace ?? DEFAULT_WORKSPACE[host]);
-  setHostIfExplicit("aiPeer", config.aiPeer, existing.aiPeer ?? DEFAULT_AI_PEER[host]);
+    // Everything else goes in the host block.
+    // Keep workspace/aiPeer host-local, but avoid materializing root defaults
+    // into new host overrides. This preserves root fallback behavior.
+    const host = getDetectedHost();
+    if (!existing.hosts) existing.hosts = {};
+    const hosts = existing.hosts;
+    const existingHost: HostConfigOnDisk = getHostBlock(hosts, host) ?? {};
 
-  // Don't persist env-only overrides to the host block.
-  // mergeWithEnvVars() may have set enabled=false or logging=false from
-  // HONCHO_ENABLED / HONCHO_LOGGING env vars — those are runtime overrides
-  // that should not be materialized to disk.
-  const enabledForSave = process.env.HONCHO_ENABLED === "false" && config.enabled === false
-    ? existingHost.enabled  // preserve what was on disk
-    : config.enabled;
-  const loggingForSave = process.env.HONCHO_LOGGING === "false" && config.logging === false
-    ? existingHost.logging
-    : config.logging;
+    // Seed with unknown fields from host aliases so the write below doesn't
+    // strip user-added config the plugin doesn't parse (e.g. `linkedHosts`).
+    // Alias entries are copied first so canonical host fields win conflicts.
+    const hostEntry: HostConfigOnDisk = {};
+    for (const hostKey of [...getHostConfigKeys(host)].reverse()) {
+      copyUnknownHostFields(hostEntry, hosts[hostKey]);
+    }
 
-  setHostIfExplicit("enabled", enabledForSave, existing.enabled);
-  setHostIfExplicit("logging", loggingForSave, existing.logging);
-  setHostIfExplicit("saveMessages", config.saveMessages, existing.saveMessages);
-  setHostIfExplicit("sessionStrategy", config.sessionStrategy, existing.sessionStrategy);
-  setHostIfExplicit("sessionPeerPrefix", config.sessionPeerPrefix, existing.sessionPeerPrefix);
-  setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);
-  setHostIfExplicit("observationMode", config.observationMode, existing.observationMode);
-  setHostIfExplicit("messageUpload", config.messageUpload, existing.messageUpload);
-  setHostIfExplicit("contextRefresh", config.contextRefresh, existing.contextRefresh);
-  setHostIfExplicit("localContext", config.localContext, existing.localContext);
-  setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
+    const setHostIfExplicit = <K extends keyof HostConfig>(
+      key: K,
+      value: HostConfig[K],
+      rootValue: unknown
+    ) => {
+      if (value === undefined) return;
+      const hasHostOverride = Object.hasOwn(existingHost, key);
+      if (hasHostOverride || !deepEqual(value, rootValue)) {
+        setKnownHostField(hostEntry, key, value);
+      }
+    };
 
-  // Preserve a host-scoped apiKey already on disk. This integration never writes
-  // apiKey (config.apiKey is the *resolved* key — env/root — and must not be
-  // materialized here), but must not drop hosts.<host>.apiKey on rewrite.
-  if (existingHost.apiKey !== undefined) {
-    hostEntry.apiKey = existingHost.apiKey;
-  }
+    // Only persist workspace/aiPeer to host block if the block already had them
+    // or if they differ from the default for this host.  This prevents root
+    // fallback values from being materialized into host overrides.
+    setHostIfExplicit("workspace", config.workspace, existing.workspace ?? DEFAULT_WORKSPACE[host]);
+    setHostIfExplicit("aiPeer", config.aiPeer, existing.aiPeer ?? DEFAULT_AI_PEER[host]);
 
-  hosts[host] = hostEntry;
+    // Don't persist env-only overrides to the host block.
+    // mergeWithEnvVars() may have set enabled=false or logging=false from
+    // HONCHO_ENABLED / HONCHO_LOGGING env vars — those are runtime overrides
+    // that should not be materialized to disk.
+    const enabledForSave = process.env.HONCHO_ENABLED === "false" && config.enabled === false
+      ? existingHost.enabled  // preserve what was on disk
+      : config.enabled;
+    const loggingForSave = process.env.HONCHO_LOGGING === "false" && config.logging === false
+      ? existingHost.logging
+      : config.logging;
 
-  writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+    setHostIfExplicit("enabled", enabledForSave, existing.enabled);
+    setHostIfExplicit("logging", loggingForSave, existing.logging);
+    setHostIfExplicit("saveMessages", config.saveMessages, existing.saveMessages);
+    setHostIfExplicit("sessionStrategy", config.sessionStrategy, existing.sessionStrategy);
+    setHostIfExplicit("sessionPeerPrefix", config.sessionPeerPrefix, existing.sessionPeerPrefix);
+    setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);
+    setHostIfExplicit("observationMode", config.observationMode, existing.observationMode);
+    setHostIfExplicit("messageUpload", config.messageUpload, existing.messageUpload);
+    setHostIfExplicit("contextRefresh", config.contextRefresh, existing.contextRefresh);
+    setHostIfExplicit("localContext", config.localContext, existing.localContext);
+    setHostIfExplicit("endpoint", config.endpoint, existing.endpoint);
+
+    // Preserve a host-scoped apiKey already on disk. This integration never writes
+    // apiKey (config.apiKey is the *resolved* key — env/root — and must not be
+    // materialized here), but must not drop hosts.<host>.apiKey on rewrite.
+    if (existingHost.apiKey !== undefined) {
+      hostEntry.apiKey = existingHost.apiKey;
+    }
+
+    hosts[host] = hostEntry;
+
+    writeFileSync(CONFIG_FILE, JSON.stringify(existing, null, 2));
+  });
 }
 
 /**
