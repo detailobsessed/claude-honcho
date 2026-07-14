@@ -6,6 +6,10 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+### Fixed
+
+- `saveConfig()` no longer strips unknown fields from the current host's config block on every write. Previously, any field added under `hosts.<host>.*` that isn't declared on the `HostConfig` interface (e.g. a user-added `linkedHosts`) was silently removed the next time the plugin persisted config. The host entry is now seeded with unknown fields from the existing block (and its hyphen/underscore aliases) before the known-field write logic runs, so user-added config survives round-trips. Ported from upstream plastic-labs/claude-honcho#29.
+
 ## [0.0.4] - 2026-07-12
 
 ### Fixed

@@ -208,6 +208,57 @@ describe("loadConfig", () => {
   });
 });
 
+describe("saveConfig unknown-field preservation (upstream #29)", () => {
+  it("keeps user-added host fields the plugin doesn't parse across a write", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      hosts: {
+        claude_code: {
+          workspace: "orig-ws",
+          aiPeer: "claude",
+          linkedHosts: ["cursor"],
+        },
+      },
+    });
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+
+    const config = mod.loadConfig();
+    expect(config).not.toBeNull();
+    config!.workspace = "new-ws";
+    mod.saveConfig(config!);
+
+    const raw = readRawConfig();
+    expect(raw.hosts.claude_code.workspace).toBe("new-ws");
+    // The unparsed field must survive the round-trip, not get stripped.
+    expect(raw.hosts.claude_code.linkedHosts).toEqual(["cursor"]);
+  });
+
+  it("carries unknown fields forward from a hyphen/underscore host alias", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      hosts: {
+        "claude-code": {
+          workspace: "orig-ws",
+          linkedHosts: ["obsidian"],
+        },
+      },
+    });
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+
+    const config = mod.loadConfig();
+    expect(config).not.toBeNull();
+    config!.workspace = "new-ws";
+    mod.saveConfig(config!);
+
+    const raw = readRawConfig();
+    expect(raw.hosts.claude_code.linkedHosts).toEqual(["obsidian"]);
+  });
+});
+
 describe("getSessionName", () => {
   it("generates per-directory session name from cwd", async () => {
     process.env.HONCHO_API_KEY = "hch-test";
