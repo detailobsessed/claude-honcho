@@ -26,9 +26,14 @@ interface HookInput {
   workspace_roots?: string[];
 }
 
+// A trivial acknowledgement ("yes", "ok", "thanks", ...) with nothing else of
+// substance. Exported so callers can gate both context retrieval and message
+// capture on the same definition.
+export const TRIVIAL_ACK = /^(yes|no|ok|sure|thanks|y|n|yep|nope|yeah|nah|continue|go ahead|do it|proceed)$/i;
+
 // Patterns to skip context injection
 const SKIP_CONTEXT_PATTERNS = [
-  /^(yes|no|ok|sure|thanks|y|n|yep|nope|yeah|nah|continue|go ahead|do it|proceed)$/i,
+  TRIVIAL_ACK,
   /^\//, // slash commands
 ];
 
@@ -204,7 +209,14 @@ export async function handleUserPrompt(): Promise<void> {
 
   // Best-effort upload. Wrap the entire SDK interaction so a transient
   // rejection during session/peer setup can't abort context retrieval below.
-  if (config.saveMessages !== false) {
+  // Trivial acks ("thanks", "ok", ...) are never stored as user speech --
+  // they carry no signal and misattribute filler to the user. Everything
+  // below this gate (message-count tracking, context retrieval) still runs.
+  const isTrivialAck = TRIVIAL_ACK.test(prompt.trim());
+  if (config.saveMessages !== false && isTrivialAck) {
+    logHook("user-prompt", "Skipping capture of trivial acknowledgement");
+  }
+  if (config.saveMessages !== false && !isTrivialAck) {
     // Redact pasted code/diffs/log-dumps before upload so the fact extractor
     // can't attribute them to the user. Only the STORED copy is stripped —
     // context retrieval below still searches the full prompt.

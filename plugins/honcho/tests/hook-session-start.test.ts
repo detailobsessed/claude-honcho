@@ -12,7 +12,7 @@ import { describe, test, expect, beforeEach, afterEach, beforeAll } from "bun:te
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { SHARED_HONCHO_DIR, clearSharedHonchoDir } from "./setup";
-import { createMockHoncho, writeHonchoConfig, makeFakeGitRepo } from "./helpers";
+import { createMockHoncho, writeHonchoConfig, makeFakeGitRepo, gitIn } from "./helpers";
 import { setHoncho, stubExit, runHook, createFailingHoncho, clearHonchoEnv } from "./hook-harness";
 import { cacheStdin, setDetectedHost } from "../src/config";
 import { enqueueOutbox } from "../src/outbox";
@@ -147,6 +147,45 @@ describe("session-start hook", () => {
       ([, messages]: [string, any[]]) => messages[0]?.content === "queued while host was down",
     );
     expect(drained).toBeDefined();
+  });
+
+  test("captureGitObservations defaults to off: no [Git External] message even on a real git change", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    const repo = makeFakeGitRepo();
+    // First run just seeds the git-state cache (a fresh cache is an "initial"
+    // change, which is filtered out regardless of the flag).
+    cacheStdin(JSON.stringify({ session_id: "git-1", cwd: repo }));
+    expect(await runHook(handleSessionStart)).toBe(0);
+
+    // A real, non-initial change: a new commit on the same branch.
+    gitIn(repo, 'commit --allow-empty -m "feat: second commit"');
+    cacheStdin(JSON.stringify({ session_id: "git-2", cwd: repo }));
+    expect(await runHook(handleSessionStart)).toBe(0);
+
+    const allMessages = (honcho.calls["session.addMessages"] ?? []).flatMap(
+      ([, messages]: [string, any[]]) => messages,
+    );
+    expect(allMessages.some((m) => typeof m.content === "string" && m.content.startsWith("[Git External]"))).toBe(
+      false,
+    );
+  });
+
+  test("captureGitObservations: true uploads a [Git External] message for a new commit", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig({ captureGitObservations: true }));
+    const repo = makeFakeGitRepo();
+    cacheStdin(JSON.stringify({ session_id: "git-1", cwd: repo }));
+    expect(await runHook(handleSessionStart)).toBe(0);
+
+    gitIn(repo, 'commit --allow-empty -m "feat: second commit"');
+    cacheStdin(JSON.stringify({ session_id: "git-2", cwd: repo }));
+    expect(await runHook(handleSessionStart)).toBe(0);
+
+    const allMessages = (honcho.calls["session.addMessages"] ?? []).flatMap(
+      ([, messages]: [string, any[]]) => messages,
+    );
+    expect(allMessages.some((m) => typeof m.content === "string" && m.content.startsWith("[Git External]"))).toBe(
+      true,
+    );
   });
 
   test("degrades gracefully (exit 0) when Honcho is unreachable during peer setup", async () => {

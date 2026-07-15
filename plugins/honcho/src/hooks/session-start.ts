@@ -167,7 +167,7 @@ export async function handleSessionStart(): Promise<void> {
 
     // Upload git changes as observations (fire-and-forget)
     // These capture external activity that happened OUTSIDE of Claude sessions
-    if (gitChanges.length > 0) {
+    if (config.captureGitObservations && gitChanges.length > 0) {
       const gitObservations = gitChanges
         .filter((c) => c.type !== "initial") // Don't log initial state as observation
         .map((change) =>

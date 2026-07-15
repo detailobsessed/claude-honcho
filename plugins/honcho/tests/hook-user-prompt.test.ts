@@ -85,18 +85,39 @@ describe("user-prompt hook", () => {
     expect(Object.keys(honcho.calls)).toHaveLength(0);
   });
 
-  test("uploads the prompt but skips context retrieval for a trivial prompt", async () => {
+  test("skips both upload and context retrieval for a trivial acknowledgement", async () => {
+    // A pure ack ("ok") carries no signal and would misattribute filler to the
+    // user if stored as speech -- it's gated out of the upload entirely, on
+    // top of the pre-existing context-retrieval skip for trivial prompts.
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
     cacheStdin(JSON.stringify({ session_id: "s1", cwd: "/tmp/proj", prompt: "ok" }));
+
+    expect(await runHook(handleUserPrompt)).toBe(0);
+
+    expect(honcho.calls["session.addMessages"]).toBeUndefined();
+    expect(honcho.calls["peer.context"]).toBeUndefined();
+  });
+
+  test("skips upload for a trivial acknowledgement with surrounding whitespace", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    cacheStdin(JSON.stringify({ session_id: "s1", cwd: "/tmp/proj", prompt: "  thanks  " }));
+
+    expect(await runHook(handleUserPrompt)).toBe(0);
+
+    expect(honcho.calls["session.addMessages"]).toBeUndefined();
+  });
+
+  test("still uploads a real prompt that happens to contain an ack word", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    const prompt = "ok, let's refactor the auth module";
+    cacheStdin(JSON.stringify({ session_id: "s1", cwd: "/tmp/proj", prompt }));
 
     expect(await runHook(handleUserPrompt)).toBe(0);
 
     const addCall = honcho.calls["session.addMessages"];
     expect(addCall).toHaveLength(1);
     const [, messages] = addCall[0];
-    expect(messages[0].content).toBe("ok");
-    expect(messages[0].opts.metadata.instance_id).toBe("s1");
-    expect(honcho.calls["peer.context"]).toBeUndefined();
+    expect(messages[0].content).toBe(prompt);
   });
 
   test("strips a pasted code block and tags it as non-speech", async () => {

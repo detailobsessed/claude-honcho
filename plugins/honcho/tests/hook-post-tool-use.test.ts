@@ -130,6 +130,16 @@ describe("post-tool-use hook", () => {
     expect(Object.keys(honcho.calls)).toHaveLength(0);
   });
 
+  test("skips the upload entirely when captureToolObservations is false", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig({ captureToolObservations: false }));
+    cacheStdin(
+      JSON.stringify({ cwd: "/tmp/proj", tool_name: "Write", tool_input: { file_path: "x.ts", content: "x" } }),
+    );
+
+    expect(await runHook(handlePostToolUse)).toBe(0);
+    expect(Object.keys(honcho.calls)).toHaveLength(0);
+  });
+
   test("swallows the error (no outbox fallback) when Honcho is unreachable", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
     setHoncho(createFailingHoncho());
