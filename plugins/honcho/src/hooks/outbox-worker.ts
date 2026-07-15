@@ -31,6 +31,7 @@ export async function handleOutboxWorker(): Promise<void> {
     const honcho = new Honcho(getHonchoClientOptions(config));
     await drainOutbox(honcho, instanceId, (m) => logHook("outbox-worker", m), {
       timeBudgetMs: 8000,
+      workspace: config.workspace,
     });
   } catch (e) {
     logHook("outbox-worker", `drain failed: ${e}`, { error: String(e) });

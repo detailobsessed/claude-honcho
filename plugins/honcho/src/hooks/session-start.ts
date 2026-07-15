@@ -155,7 +155,7 @@ export async function handleSessionStart(): Promise<void> {
       honcho,
       claudeInstanceId ?? sessionName,
       (m) => logHook("session-start", m),
-      { timeBudgetMs: 8000 },
+      { timeBudgetMs: 8000, workspace: config.workspace },
     ).catch((e) => logHook("session-start", `outbox drain failed: ${e}`));
 
     // Only persist session names for per-directory strategy (stable names).

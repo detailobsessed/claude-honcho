@@ -40,7 +40,7 @@ function readOutbox(): any[] {
     .map((l) => JSON.parse(l));
 }
 
-function seedOutbox(content: string): void {
+function seedOutbox(content: string, workspace?: string): void {
   const now = new Date().toISOString();
   enqueueOutbox([
     {
@@ -50,6 +50,7 @@ function seedOutbox(content: string): void {
       metadata: { type: "assistant_response" },
       createdAt: now,
       queuedAt: now,
+      workspace,
     },
   ]);
 }
@@ -96,5 +97,16 @@ describe("outbox worker hook", () => {
     expect(await runHook(handleOutboxWorker)).toBe(0);
 
     expect(readOutbox().some((r) => r.content === "still queued")).toBe(true);
+  });
+
+  test("leaves a record bound for another workspace queued (no cross-workspace leak)", async () => {
+    // Worker resolves to "test-ws" (baseConfig, no directory override for /tmp/proj).
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    seedOutbox("belongs to another project", "other-ws");
+    expect(await runHook(handleOutboxWorker)).toBe(0);
+
+    // Never uploaded here; held for a drain scoped to "other-ws".
+    expect(honcho.calls["session.addMessages"]).toBeUndefined();
+    expect(readOutbox().some((r) => r.content === "belongs to another project")).toBe(true);
   });
 });
