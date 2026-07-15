@@ -138,4 +138,24 @@ describe("stop hook", () => {
     expect(argv[3]).toBe("/tmp/proj");
     expect(opts.detached).toBe(true);
   });
+
+  test("does not append (and still spawns the worker) when the outbox is over its size cap", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    // Pre-fill the outbox past MAX_OUTBOX_BYTES (5MB) so enqueueOutbox returns 0.
+    writeFileSync(join(SHARED_HONCHO_DIR, "outbox.jsonl"), "x".repeat(5 * 1024 * 1024 + 1));
+    cacheStdin(
+      JSON.stringify({
+        session_id: "sess-3",
+        cwd: "/tmp/proj",
+        transcript_path: assistantTranscript(MEANINGFUL),
+      }),
+    );
+    expect(await runHook(handleStop)).toBe(0);
+
+    // Nothing appended — the record was dropped, not silently reported as queued.
+    const raw = readFileSync(join(SHARED_HONCHO_DIR, "outbox.jsonl"), "utf-8");
+    expect(raw.includes("assistant_response")).toBe(false);
+    // Worker still spawned so it can drain the existing backlog (frees the cap).
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+  });
 });
