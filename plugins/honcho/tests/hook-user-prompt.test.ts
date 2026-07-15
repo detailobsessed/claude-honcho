@@ -99,6 +99,41 @@ describe("user-prompt hook", () => {
     expect(honcho.calls["peer.context"]).toBeUndefined();
   });
 
+  test("strips a pasted code block and tags it as non-speech", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    cacheStdin(
+      JSON.stringify({
+        session_id: "s1",
+        cwd: "/tmp/proj",
+        prompt:
+          "Please review this function:\n```ts\nfunction secretFunction() {\n  return 42;\n}\n```\nThanks!",
+      }),
+    );
+
+    expect(await runHook(handleUserPrompt)).toBe(0);
+
+    const addCall = honcho.calls["session.addMessages"];
+    expect(addCall).toHaveLength(1);
+    const [, messages] = addCall[0];
+    expect(messages[0].content).toContain("[code block removed]");
+    expect(messages[0].content).not.toContain("secretFunction");
+    expect(messages[0].opts.metadata.type).toBe("user_paste_not_speech");
+  });
+
+  test("leaves pure prose unmodified and untagged", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    const prompt = "Please help me refactor the auth module for clarity.";
+    cacheStdin(JSON.stringify({ session_id: "s1", cwd: "/tmp/proj", prompt }));
+
+    expect(await runHook(handleUserPrompt)).toBe(0);
+
+    const addCall = honcho.calls["session.addMessages"];
+    expect(addCall).toHaveLength(1);
+    const [, messages] = addCall[0];
+    expect(messages[0].content).toBe(prompt);
+    expect(messages[0].opts.metadata.type).toBeUndefined();
+  });
+
   test("skips the upload when saveMessages is false but still serves fresh cached context", async () => {
     const config = baseConfig({ saveMessages: false });
     writeHonchoConfig(SHARED_HONCHO_DIR, config);
