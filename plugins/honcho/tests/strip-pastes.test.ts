@@ -28,6 +28,34 @@ describe("stripPastes", () => {
     expect(text).not.toContain("secretFunction");
   });
 
+  test("redacts a ~~~-fenced code block", () => {
+    const prompt = "Look at this:\n~~~python\ndef secretFunction():\n    return 42\n~~~\nok?";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(true);
+    expect(text).toContain("[code block removed]");
+    expect(text).not.toContain("secretFunction");
+    expect(text).toContain("Look at this:");
+    expect(text).toContain("ok?");
+  });
+
+  test("redacts an unterminated fence to end of input", () => {
+    // Truncated paste: opening fence, no closing fence.
+    const prompt = "Here is the log:\n```\nsecretFunction() threw at line 40\nand a second line";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(true);
+    expect(text).toContain("[code block removed]");
+    expect(text).not.toContain("secretFunction");
+    expect(text).toContain("Here is the log:");
+  });
+
+  test("a stray inline ``` in prose does not swallow the message", () => {
+    // Opening fence must start a line — an inline backtick run is left alone.
+    const prompt = "Please wrap the output in ``` when you show it to me.";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(false);
+    expect(text).toBe(prompt);
+  });
+
   test("redacts a run of 3+ consecutive unified-diff lines", () => {
     const prompt =
       "Review this:\n+function buildOperatorPlan() {\n-  return old;\n+  return next;\n";
