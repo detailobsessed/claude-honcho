@@ -6,10 +6,23 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-15
+
+Directory-scoped workspaces: route each project to its own Honcho memory instead of pooling everything in one global workspace.
+
+### Added
+
+- **Directory-scoped workspaces** (hardens upstream plastic-labs/claude-honcho#64): route each project directory to its own Honcho workspace so memory stops bleeding across projects.
+  - Prefix routing via a new `workspaceRules` list mapping a directory prefix to a workspace — segment-aware, `~`-expanding, longest match wins — so one rule can cover every repo under a parent tree. A shared `resolveDirectoryOverride` backs both routing and isolation.
+  - Per-workspace injected-context cache keyed by resolved workspace, so concurrent sessions on different workspaces can't read each other's memory. Legacy single-slot cache fields are preserved (not stripped) on upgrade.
+  - Re-nudge until decided: an uncovered directory is nudged every session until the user isolates it, adds a prefix rule, or explicitly keeps it pooled via the new `keep_pooled` MCP tool. An explicit keep-pooled decision is terminal and is honored before `autoIsolate`.
+
 ### Fixed
 
+- `updateRawConfigFile` now wraps its read-modify-write of `~/.honcho/config.json` in a new `withConfigLock` helper (mirroring `withContextCacheLock`: an exclusive `openSync("wx")` lockfile with 5s stale-lock breaking and a 3s timeout that proceeds unlocked rather than hang a short-lived hook). Previously two concurrent auto-isolations — or an MCP `keep_pooled` update racing a session-start hook — could both read the same file and have the second write silently drop the `directoryWorkspaces` entry the first added, sending that project back to the global workspace.
 - `saveConfig()` no longer strips unknown fields from the current host's config block on every write. Previously, any field added under `hosts.<host>.*` that isn't declared on the `HostConfig` interface (e.g. a user-added `linkedHosts`) was silently removed the next time the plugin persisted config. The host entry is now seeded with unknown fields from the existing block (and its hyphen/underscore aliases) before the known-field write logic runs, so user-added config survives round-trips. Ported from upstream plastic-labs/claude-honcho#29.
 - `saveConfig()` now serializes its read-merge-write of `config.json` under the same `withConfigLock` used by the other config writers. Previously it wrote outside any lock, so a concurrent session-start hook or MCP write could clobber the host block it had just written (and vice versa) — the same cross-process race already fixed for `updateRawConfigFile`.
+- Removed the redundant `"hooks": "./hooks/hooks.json"` key from `plugin.json`. Claude Code already auto-discovers `hooks/hooks.json`, so the explicit key registered the hooks twice and errored out on `/plugins-reload`.
 
 ## [0.0.4] - 2026-07-12
 
