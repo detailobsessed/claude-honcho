@@ -1,8 +1,8 @@
-import { Honcho } from "@honcho-ai/sdk";
-import { loadConfig, getSessionName, getHonchoClientOptions, isPluginEnabled, getCachedStdin, applyDirectoryOverride } from "../config.js";
+import { join } from "path";
+import { loadConfig, getSessionName, isPluginEnabled, getCachedStdin, applyDirectoryOverride } from "../config.js";
 import { existsSync, readFileSync } from "fs";
 import { getInstanceIdForCwd } from "../cache.js";
-import { logHook, logApiCall, setLogContext } from "../log.js";
+import { logHook, setLogContext } from "../log.js";
 import { visStopMessage } from "../visual.js";
 import { enqueueOutbox } from "../outbox.js";
 
@@ -144,48 +144,44 @@ export async function handleStop(): Promise<void> {
 
   logHook("stop", `Capturing assistant response (${lastMessage.length} chars)`);
 
-  try {
-    const honcho = new Honcho(getHonchoClientOptions(config));
-
-    // Get session and peer using new fluent API
-    const session = await honcho.session(sessionName);
-    const aiPeer = await honcho.peer(config.aiPeer);
-
-    // Upload the assistant response
-    logApiCall("session.addMessages", "POST", `assistant response (${lastMessage.length} chars)`);
-
-    await session.addMessages([
-      aiPeer.message(lastMessage.slice(0, 3000), {
-        createdAt: new Date().toISOString(),
-        metadata: {
-          instance_id: instanceId || undefined,
-          type: "assistant_response",
-          session_affinity: sessionName,
-        },
-      }),
-    ]);
-
-    logHook("stop", `Assistant response saved`);
-    visStopMessage("out", `saved response (${lastMessage.length} chars)`);
-  } catch (error) {
-    logHook("stop", `Upload failed: ${error}`, { error: String(error) });
-    // Host unreachable — queue the response rather than drop it.
-    const queuedAt = new Date().toISOString();
-    enqueueOutbox([
-      {
-        sessionName,
-        peerName: config.aiPeer,
-        content: lastMessage.slice(0, 3000),
-        metadata: {
-          instance_id: instanceId || undefined,
-          type: "assistant_response",
-          session_affinity: sessionName,
-        },
-        createdAt: queuedAt,
-        queuedAt,
+  // Never block turn-end on the network. Durably queue the response and hand the
+  // upload to a detached worker that outlives this hook; whatever it can't send
+  // stays queued and drains on the next SessionStart (existing safety net).
+  const queuedAt = new Date().toISOString();
+  enqueueOutbox([
+    {
+      sessionName,
+      peerName: config.aiPeer,
+      content: lastMessage.slice(0, 3000),
+      metadata: {
+        instance_id: instanceId || undefined,
+        type: "assistant_response",
+        session_affinity: sessionName,
       },
-    ]);
-  }
-
+      createdAt: queuedAt,
+      queuedAt,
+    },
+  ]);
+  visStopMessage("out", `queued response (${lastMessage.length} chars)`);
+  spawnOutboxWorker(cwd, instanceId || sessionName);
   process.exit(0);
+}
+
+/**
+ * Fire the detached, upload-only outbox worker so the response reaches Honcho
+ * out-of-band. Best-effort: the record is already queued, so a spawn failure is
+ * harmless — the next SessionStart will drain it — and must never break the hook.
+ */
+function spawnOutboxWorker(cwd: string, instanceId: string): void {
+  try {
+    const workerPath = join(import.meta.dir, "..", "..", "hooks", "outbox-worker.ts");
+    Bun.spawn(["bun", "run", workerPath, cwd, instanceId], {
+      detached: true,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    }).unref();
+  } catch (e) {
+    logHook("stop", `outbox worker spawn failed: ${e}`);
+  }
 }
