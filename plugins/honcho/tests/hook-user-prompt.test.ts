@@ -194,6 +194,39 @@ describe("user-prompt hook", () => {
     logSpy.mockRestore();
   });
 
+  test("injects prompt-matched conclusions first on a fresh fetch (#63)", async () => {
+    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
+    const contextHoncho = createMockHoncho({
+      contextResult: {
+        representation: "[2026-01-01 10:00:00] an old unrelated fact",
+        peerCard: ["Backend engineer"],
+      },
+      searchMatched: ["the kubernetes deriver work from today"],
+    });
+    setHoncho(contextHoncho);
+    const logSpy = spyOn(console, "log");
+    cacheStdin(
+      JSON.stringify({ session_id: "s6", cwd: "/tmp/proj", prompt: "how is the kubernetes deriver going" }),
+    );
+
+    expect(await runHook(handleUserPrompt)).toBe(0);
+
+    // The matched conclusions were queried via the conclusion scope, using the
+    // same search query as the context call.
+    const q = contextHoncho.calls["peer.conclusions.query"];
+    expect(q).toHaveLength(1);
+    expect(q[0][1]).toBe("kubernetes");
+
+    // ...and they lead the injected block, ahead of the stale representation line.
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string);
+    const ctx = output.hookSpecificOutput.additionalContext as string;
+    expect(ctx).toContain("Relevant conclusions: the kubernetes deriver work from today");
+    expect(ctx.indexOf("the kubernetes deriver work from today")).toBeLessThan(
+      ctx.indexOf("an old unrelated fact"),
+    );
+    logSpy.mockRestore();
+  });
+
   test("queues the prompt to the outbox when the upload fails", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
     setHoncho(createFailingHoncho());
@@ -229,17 +262,19 @@ describe("user-prompt hook", () => {
 
 describe("formatCachedContext dedup (#39: don't re-inject the same conclusions every turn)", () => {
   const context = {
+    // Timestamps ascending (x < y < z), the order the representation arrives in.
     representation: "[x] likes TypeScript\n[y] uses Bun\n[z] debugs auth",
   };
 
-  test("first turn (empty seen set) surfaces all conclusions", () => {
+  test("first turn (empty seen set) surfaces all conclusions, newest first (#63)", () => {
     const result = formatCachedContext(context, "user", []);
     expect(result.parts.some((p) => p.startsWith("Relevant conclusions:"))).toBe(true);
     const conclusionsPart = result.parts.find((p) => p.startsWith("Relevant conclusions:"))!;
     expect(conclusionsPart).toContain("likes TypeScript");
     expect(conclusionsPart).toContain("uses Bun");
     expect(conclusionsPart).toContain("debugs auth");
-    expect(result.newConclusions).toEqual(["likes TypeScript", "uses Bun", "debugs auth"]);
+    // Newest-first: [z] debugs auth, [y] uses Bun, [x] likes TypeScript.
+    expect(result.newConclusions).toEqual(["debugs auth", "uses Bun", "likes TypeScript"]);
   });
 
   test("second turn with the same conclusions already seen yields no re-injection", () => {
