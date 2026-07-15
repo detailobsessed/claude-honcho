@@ -120,15 +120,28 @@ function formatSessionLink(sessionUrl: string): string {
  * Line-leading labels that mark output the user pasted rather than their own
  * speech. Anchored at line start (`^`, up to 3 leading spaces) so an inline
  * mention in genuine prose ("...I hit an error: it crashed") never matches —
- * only a line that BEGINS with the label, the way pasted output does. Kept
- * high-precision on purpose: review-bot names and unambiguous crash/trace
- * markers, not common words like a bare "error"/"warning" a user might open a
- * sentence with. The match runs through the end of the block (to the next blank
- * line or end-of-input) so a multi-line review comment or stack trace goes with
- * its opening line. Extend the alternation as new tools show up in the workflow.
+ * only a line that BEGINS with the label, the way pasted output does. Matched
+ * through the end of the block (to the next blank line or end-of-input) so a
+ * multi-line review comment or stack trace goes with its opening line.
+ *
+ * Two tiers, both kept high-precision:
+ *   - CRASH_MARKERS are distinctive enough (multi-word or rare) that a bare
+ *     word-boundary match is safe — a user essentially never opens a line with
+ *     "Traceback" or "Exception in thread".
+ *   - AMBIGUOUS_MARKERS are ordinary English a user CAN open a line with
+ *     ("Panic attacks…", "Fatal error handling…", "Copilot suggested…"), so
+ *     they only count as pasted output when the marker is immediately followed
+ *     by trace/label punctuation — a colon (`panic:`, `macroscope:`) or a
+ *     bracket (`copilot[bot]`), the way real crash dumps and review-bot comments
+ *     render. Bare prose ("Panic mode: here's what I want") is preserved.
+ * Extend either list as new tools/crash formats show up in the workflow.
  */
-const PASTED_ATTRIBUTION_RE =
-  /^[ \t]{0,3}(?:macroscope|copilot|coderabbit(?:ai)?|sourcery|greptile|traceback|stack ?trace|assertion ?error|exception in thread|unhandled exception|segmentation fault|panic|fatal error)\b.*(?:\r?\n(?![ \t]*(?:\r?\n|$)).*)*/gim;
+const CRASH_MARKERS = "traceback|assertion ?error|exception in thread|unhandled exception|segmentation fault";
+const AMBIGUOUS_MARKERS = "panic|fatal error|stack ?trace|macroscope|copilot|coderabbit(?:ai)?|sourcery|greptile";
+const PASTED_ATTRIBUTION_RE = new RegExp(
+  `^[ \\t]{0,3}(?:(?:${CRASH_MARKERS})\\b|(?:${AMBIGUOUS_MARKERS})[ \\t]*[:\\[]).*(?:\\r?\\n(?![ \\t]*(?:\\r?\\n|$)).*)*`,
+  "gim",
+);
 
 /**
  * Redact pasted non-prose from a user prompt before it's uploaded as user

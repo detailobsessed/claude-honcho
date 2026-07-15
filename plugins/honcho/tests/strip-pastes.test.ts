@@ -164,4 +164,46 @@ describe("stripPastes", () => {
     expect(redacted).toBe(false);
     expect(text).toBe(prompt);
   });
+
+  test("preserves genuine prose opening with a common crash word (no trace punctuation)", () => {
+    // The mirror of the misattribution bug: a user's real words that happen to
+    // start with "Panic"/"Fatal error"/"Copilot"/"Stack trace" must survive.
+    // Only the punctuated forms (`panic:`, `copilot[bot]`) read as pasted output.
+    for (const prompt of [
+      "Panic attacks are affecting me and I need to step away for a bit.",
+      "Fatal error handling should be refactored to use Result types.",
+      "Copilot suggested a cleaner approach — should we take it?",
+      "Stack trace was enormous, so let me just summarize the failure instead.",
+      "Panic mode: here's what I want, plus a second sentence to be sure.",
+    ]) {
+      const { text, redacted } = stripPastes(prompt);
+      expect(redacted).toBe(false);
+      expect(text).toBe(prompt);
+    }
+  });
+
+  test("still redacts real Go crash output (panic:/fatal error: carry a colon)", () => {
+    const prompt =
+      "It blew up:\n" +
+      "panic: runtime error: invalid memory address or nil pointer dereference\n" +
+      "\tgoroutine 1 [running]:\n" +
+      "main.main()\n\n" +
+      "any idea why?";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(true);
+    expect(text).toContain("[tool output removed]");
+    expect(text).not.toContain("goroutine");
+    expect(text).not.toContain("invalid memory address");
+    expect(text).toContain("It blew up:");
+    expect(text).toContain("any idea why?");
+  });
+
+  test("redacts a review-bot label carrying a bracket (copilot[bot])", () => {
+    const prompt = "copilot[bot] flagged this:\nrename the function before merge\n\nthoughts?";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(true);
+    expect(text).toContain("[tool output removed]");
+    expect(text).not.toContain("rename the function");
+    expect(text).toContain("thoughts?");
+  });
 });
