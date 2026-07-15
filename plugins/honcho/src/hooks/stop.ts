@@ -148,7 +148,7 @@ export async function handleStop(): Promise<void> {
   // upload to a detached worker that outlives this hook; whatever it can't send
   // stays queued and drains on the next SessionStart (existing safety net).
   const queuedAt = new Date().toISOString();
-  enqueueOutbox([
+  const queued = enqueueOutbox([
     {
       sessionName,
       peerName: config.aiPeer,
@@ -163,7 +163,16 @@ export async function handleStop(): Promise<void> {
       workspace: config.workspace,
     },
   ]);
-  visStopMessage("out", `queued response (${lastMessage.length} chars)`);
+  if (queued > 0) {
+    visStopMessage("out", `queued response (${lastMessage.length} chars)`);
+  } else {
+    // enqueueOutbox returned 0: the outbox is over its size cap or the write
+    // failed, so this response was dropped. Report the drop rather than a false
+    // "queued"; the worker below still runs to drain any existing backlog, which
+    // is what frees a full outbox.
+    logHook("stop", `Response dropped — outbox full or unwritable (${lastMessage.length} chars)`);
+    visStopMessage("out", `dropped response — outbox full`);
+  }
   spawnOutboxWorker(cwd, instanceId || sessionName);
   process.exit(0);
 }
