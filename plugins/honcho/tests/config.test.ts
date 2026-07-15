@@ -289,6 +289,45 @@ describe("captureGitObservations / captureToolObservations defaults (capture hyg
     expect(config).not.toBeNull();
     expect(config!.captureGitObservations).toBe(true);
   });
+
+  it("does not persist an env-only captureGitObservations=true override to disk", async () => {
+    // No config file: loadConfig() falls through to loadConfigFromEnv(), which
+    // bakes HONCHO_CAPTURE_GIT_OBSERVATIONS into config. saveConfig() must not
+    // materialize it, or removing the env var later wouldn't restore default-off.
+    process.env.HONCHO_API_KEY = "hch-key";
+    process.env.HONCHO_CAPTURE_GIT_OBSERVATIONS = "true";
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+
+    const config = mod.loadConfig();
+    expect(config!.captureGitObservations).toBe(true); // active at runtime via env
+    mod.saveConfig(config!);
+
+    const raw = readRawConfig();
+    expect(raw.hosts?.claude_code?.captureGitObservations).toBeUndefined();
+
+    // With the env var gone, the persisted config resolves back to default-off.
+    delete process.env.HONCHO_CAPTURE_GIT_OBSERVATIONS;
+    expect(mod.loadConfig()!.captureGitObservations).toBeFalsy();
+  });
+
+  it("does not persist an env-only captureToolObservations=false override to disk", async () => {
+    process.env.HONCHO_API_KEY = "hch-key";
+    process.env.HONCHO_CAPTURE_TOOL_OBSERVATIONS = "false";
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+
+    const config = mod.loadConfig();
+    expect(config!.captureToolObservations).toBe(false); // active at runtime via env
+    mod.saveConfig(config!);
+
+    const raw = readRawConfig();
+    expect(raw.hosts?.claude_code?.captureToolObservations).toBeUndefined();
+
+    // With the env var gone, the persisted config resolves back to default-on.
+    delete process.env.HONCHO_CAPTURE_TOOL_OBSERVATIONS;
+    expect(mod.loadConfig()!.captureToolObservations).not.toBe(false);
+  });
 });
 
 describe("saveConfig unknown-field preservation (upstream #29)", () => {
