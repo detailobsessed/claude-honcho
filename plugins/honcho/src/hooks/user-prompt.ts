@@ -226,6 +226,7 @@ export async function handleUserPrompt(): Promise<void> {
           },
           createdAt: queuedAt,
           queuedAt,
+          workspace: config.workspace,
         })),
       );
     } finally {
