@@ -6,6 +6,10 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-15
+
+Turn-path reliability and memory quality: move uploads off the turn-end critical path, stop storing pasted content as the user's own speech, and inject the conclusions that actually match the prompt.
+
 ### Changed
 
 - The `Stop` hook no longer uploads the assistant response synchronously on the turn-end critical path. It now durably queues the response to the local outbox and hands the upload to a detached, upload-only worker (`hooks/outbox-worker.ts`) that outlives the hook, so a slow or unreachable Honcho can no longer stall the end of every turn (previously up to the SDK's ~8s timeout). Anything the worker can't send stays queued and drains on the next `SessionStart` (the existing safety net). Adapts the non-blocking approach of upstream plastic-labs/claude-honcho#50 to this fork's outbox architecture (the fork has no `SessionEnd` hook — it was removed — so the upstream exit-hang symptom does not apply here).
