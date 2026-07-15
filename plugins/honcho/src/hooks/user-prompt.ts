@@ -120,15 +120,24 @@ function formatSessionLink(sessionUrl: string): string {
  * speech. Everything on a `role: "user"` message is read by the server-side
  * fact extractor as the user's own words, so pasted diffs/code/log-dumps become
  * durable misattributions ("<user> changed buildOperatorPlan" from a diff the
- * user asked to review). Redacts fenced code blocks, runs of 3+ consecutive
- * diff lines, and long path-bearing output lines; short path mentions and a
- * lone "+"/"-" line in prose are preserved. Returns the possibly-redacted text
+ * user asked to review). Redacts fenced code blocks (``` or ~~~, including
+ * unterminated fences from truncated pastes), runs of 3+ consecutive diff
+ * lines, and long path-bearing output lines; short path mentions and a lone
+ * "+"/"-" line in prose are preserved. Returns the possibly-redacted text
  * and whether anything was removed. Ported from upstream plastic-labs/claude-honcho#34.
  */
 export function stripPastes(text: string): { text: string; redacted: boolean } {
   let out = text;
-  // 1. Markdown fenced code blocks.
-  out = out.replace(/```[\s\S]*?```/g, "[code block removed]");
+  // 1. Markdown fenced code blocks. Handle both ``` and ~~~ fences, and close
+  //    on a matching fence line OR end-of-input — a truncated paste often has
+  //    no closing fence, and we still don't want its body stored as speech.
+  //    The opening fence must start its own line (CommonMark allows up to 3
+  //    leading spaces) so a stray inline ``` in prose can't swallow the rest of
+  //    a genuine message.
+  out = out.replace(
+    /^[ \t]{0,3}(`{3,}|~{3,})[\s\S]*?(?:^[ \t]{0,3}\1.*$|$(?![\s\S]))/gm,
+    "[code block removed]",
+  );
   // 2. Runs of 3+ consecutive unified-diff lines. A single prefixed line in
   //    prose ("Note: + means added") stays; only a real diff block is redacted.
   out = out.replace(/(?:^[+-].*(?:\r?\n|$)){3,}/gm, "[diff removed]\n");
