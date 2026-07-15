@@ -110,11 +110,18 @@ export function createFailingHoncho(message = "host unreachable"): any {
     },
     peer: async (name: string) => {
       record("peer", [name]);
+      const failingScope = {
+        query: async () => {
+          throw new Error(message);
+        },
+      };
       return {
         message: (content: string, opts?: any) => ({ peerName: name, content, opts }),
         context: async () => {
           throw new Error(message);
         },
+        conclusions: failingScope,
+        conclusionsOf: () => failingScope,
         chat: async () => {
           throw new Error(message);
         },

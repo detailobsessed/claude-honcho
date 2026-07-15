@@ -83,7 +83,7 @@ export function clearHonchoDir(honchoDir: string): void {
  * `peer.context()` / `session.summaries()` resolve to.
  */
 export function createMockHoncho(
-  overrides: { contextResult?: any; summaries?: any } = {},
+  overrides: { contextResult?: any; summaries?: any; searchMatched?: any[] } = {},
 ): any {
   const calls: Record<string, any[]> = {};
 
@@ -91,6 +91,18 @@ export function createMockHoncho(
     if (!calls[name]) calls[name] = [];
     calls[name].push(args);
   }
+
+  // A conclusion scope exposes .query(searchQuery, topK) — used by the
+  // user-prompt hook to fetch prompt-matched conclusions. Returns the SDK's
+  // `{ content }` shape so callers can map `.content`.
+  const conclusionScope = (recordName: string, target?: string) => ({
+    query: async (searchQuery: string, topK?: number) => {
+      record(recordName, [target, searchQuery, topK]);
+      return (overrides.searchMatched ?? []).map((c) =>
+        typeof c === "string" ? { content: c } : c,
+      );
+    },
+  });
 
   const mockSession = (name: string) => ({
     id: `session-${name}`,
@@ -104,6 +116,8 @@ export function createMockHoncho(
     id: `peer-${name}`,
     name,
     message: (content: string, opts?: any) => ({ peerName: name, content, opts }),
+    conclusions: conclusionScope("peer.conclusions.query", name),
+    conclusionsOf: (target: string) => conclusionScope("peer.conclusionsOf.query", target),
     context: async (opts?: any) => {
       record("peer.context", [name, opts]);
       // peerCard is an array of strings, matching the real SDK (callers .join() it).
