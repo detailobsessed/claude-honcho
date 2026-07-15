@@ -102,4 +102,66 @@ describe("stripPastes", () => {
     expect(redacted).toBe(false);
     expect(text).toBe(prompt);
   });
+
+  test("redacts a pasted review-bot comment (the live misattribution repro)", () => {
+    // A pasted "macroscope:" finding was being minted as "<user> identified an
+    // issue in config.ts around line 681" — the user's own instruction survives.
+    const prompt =
+      "Please fix this finding:\n" +
+      "macroscope: In file @plugins/honcho/src/config.ts around line 681: saveConfig persists the resolved flags\n" +
+      "without excluding environment-derived values. Guard them.\n\n" +
+      "Go ahead.";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(true);
+    expect(text).toContain("[tool output removed]");
+    expect(text).toContain("Please fix this finding:");
+    expect(text).toContain("Go ahead.");
+    expect(text).not.toContain("config.ts");
+    expect(text).not.toContain("saveConfig");
+    expect(text).not.toContain("environment-derived");
+  });
+
+  test("redacts a pasted stack trace opening with a Traceback marker", () => {
+    const prompt =
+      "It crashed:\n" +
+      "Traceback (most recent call last):\n" +
+      '  File "/app/main.py", line 10, in <module>\n' +
+      "    do_thing()\n" +
+      "RuntimeError: boom\n\n" +
+      "fix it please";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(true);
+    expect(text).toContain("[tool output removed]");
+    expect(text).not.toContain("Traceback");
+    expect(text).not.toContain("RuntimeError");
+    expect(text).toContain("fix it please");
+  });
+
+  test("redacts a run of markdown blockquote lines (quoted, not the user's words)", () => {
+    const prompt =
+      "The reviewer said:\n> This function is misnamed.\n> Rename it before merge.\nWhat do you think?";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(true);
+    expect(text).toContain("[quoted text removed]");
+    expect(text).not.toContain("misnamed");
+    expect(text).toContain("The reviewer said:");
+    expect(text).toContain("What do you think?");
+  });
+
+  test("preserves an inline 'error:' mention in genuine prose", () => {
+    // Not line-anchored to a marker — the user is speaking, not pasting.
+    const prompt = "I keep getting an error: the build fails intermittently. Any ideas?";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(false);
+    expect(text).toBe(prompt);
+  });
+
+  test("preserves a user line that merely opens with 'Error:' (high-precision markers only)", () => {
+    // "error"/"warning" are deliberately NOT markers — a user may open a
+    // sentence with them. Only bot names and unambiguous crash markers fire.
+    const prompt = "Error: my local build is broken. Can you help me debug it?";
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(false);
+    expect(text).toBe(prompt);
+  });
 });
