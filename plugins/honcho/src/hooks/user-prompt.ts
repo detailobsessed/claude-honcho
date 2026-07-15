@@ -116,6 +116,32 @@ function formatSessionLink(sessionUrl: string): string {
 }
 
 /**
+ * Redact pasted non-prose from a user prompt before it's uploaded as user
+ * speech. Everything on a `role: "user"` message is read by the server-side
+ * fact extractor as the user's own words, so pasted diffs/code/log-dumps become
+ * durable misattributions ("<user> changed buildOperatorPlan" from a diff the
+ * user asked to review). Redacts fenced code blocks, runs of 3+ consecutive
+ * diff lines, and long path-bearing output lines; short path mentions and a
+ * lone "+"/"-" line in prose are preserved. Returns the possibly-redacted text
+ * and whether anything was removed. Ported from upstream plastic-labs/claude-honcho#34.
+ */
+export function stripPastes(text: string): { text: string; redacted: boolean } {
+  let out = text;
+  // 1. Markdown fenced code blocks.
+  out = out.replace(/```[\s\S]*?```/g, "[code block removed]");
+  // 2. Runs of 3+ consecutive unified-diff lines. A single prefixed line in
+  //    prose ("Note: + means added") stays; only a real diff block is redacted.
+  out = out.replace(/(?:^[+-].*(?:\r?\n|$)){3,}/gm, "[diff removed]\n");
+  // 3. Lines >200 chars that carry a filesystem path — stack traces, log dumps,
+  //    JSON blobs. Real prose lines are rarely that long; tool output often is.
+  out = out
+    .split("\n")
+    .map((line) => (line.length > 200 && /[\w.-]*\/[\w.-]+/.test(line) ? "[path/output removed]" : line))
+    .join("\n");
+  return { text: out, redacted: out !== text };
+}
+
+/**
  * UserPromptSubmit hook — serves cached context instantly, refreshes when stale.
  *
  * Context lifecycle:
@@ -174,20 +200,24 @@ export async function handleUserPrompt(): Promise<void> {
   // Best-effort upload. Wrap the entire SDK interaction so a transient
   // rejection during session/peer setup can't abort context retrieval below.
   if (config.saveMessages !== false) {
+    // Redact pasted code/diffs/log-dumps before upload so the fact extractor
+    // can't attribute them to the user. Only the STORED copy is stripped —
+    // context retrieval below still searches the full prompt.
+    const { text: cleanPrompt, redacted } = stripPastes(prompt);
+    const promptMetadata: Record<string, unknown> = {
+      instance_id: instanceId || undefined,
+      session_affinity: sessionName,
+      ...(redacted ? { type: "user_paste_not_speech" } : {}),
+    };
     const uploadPromise = (async () => {
       const [session, userPeer] = await Promise.all([
         honcho.session(sessionName),
         honcho.peer(config.peerName),
       ]);
-      const messages = chunkContent(prompt).map((chunk) =>
-        userPeer.message(chunk, {
-          metadata: {
-            instance_id: instanceId || undefined,
-            session_affinity: sessionName,
-          },
-        })
+      const messages = chunkContent(cleanPrompt).map((chunk) =>
+        userPeer.message(chunk, { metadata: promptMetadata })
       );
-      logApiCall("session.addMessages", "POST", `user prompt (${prompt.length} chars)`);
+      logApiCall("session.addMessages", "POST", `user prompt (${cleanPrompt.length} chars)`);
       await session.addMessages(messages);
     })();
 
@@ -216,14 +246,11 @@ export async function handleUserPrompt(): Promise<void> {
       // the prompt locally. Drained at the next SessionStart once the host is back.
       const queuedAt = new Date().toISOString();
       enqueueOutbox(
-        chunkContent(prompt).map((chunk) => ({
+        chunkContent(cleanPrompt).map((chunk) => ({
           sessionName,
           peerName: config.peerName,
           content: chunk,
-          metadata: {
-            instance_id: instanceId || undefined,
-            session_affinity: sessionName,
-          },
+          metadata: promptMetadata,
           createdAt: queuedAt,
           queuedAt,
           workspace: config.workspace,

@@ -254,6 +254,11 @@ async function logToHonchoAsync(config: any, cwd: string, summary: string): Prom
       metadata: {
         instance_id: instanceId || undefined,
         session_affinity: sessionName,
+        // Role discriminator: this is the assistant acting on the user's behalf,
+        // not the user speaking. Without it, directional/MCP scopes fold tool
+        // actions into the user's representation as "<user> did X". See #34.
+        type: "tool_action",
+        subject: "ai_action_on_user_behalf",
       },
     }),
   ]);

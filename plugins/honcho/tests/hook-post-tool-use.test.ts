@@ -103,6 +103,11 @@ describe("post-tool-use hook", () => {
     expect(messages[0].content).toContain("[Tool] Wrote foo.ts");
     expect(messages[0].content).toContain("defines function foo");
     expect(messages[0].opts.metadata.session_affinity).toBeDefined();
+    // Role discriminator (#34): a tool action is the assistant acting on the
+    // user's behalf, not the user speaking — without this, directional/MCP
+    // scopes fold tool actions into the user's own representation.
+    expect(messages[0].opts.metadata.type).toBe("tool_action");
+    expect(messages[0].opts.metadata.subject).toBe("ai_action_on_user_behalf");
   });
 
   test("categorizes a Bash package-manager command in the logged summary", async () => {
