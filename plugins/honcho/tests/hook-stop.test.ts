@@ -3,16 +3,16 @@
  *
  * Drives the real handler end-to-end with fake stdin (via cacheStdin), a
  * config on the mocked temp home, and a fake transcript file, asserting on the
- * mocked Honcho calls and the outbox — i.e. that the hook actually uploads the
- * last assistant message, and queues it instead of dropping it when the host
- * is unreachable.
+ * outbox and the spawned worker — i.e. that the hook never uploads on the turn
+ * path, but durably queues the last assistant message and fires the detached
+ * worker to flush it out-of-band.
  */
-import { describe, test, expect, beforeEach, afterEach, beforeAll } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, beforeAll, spyOn } from "bun:test";
 import { writeFileSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { SHARED_HONCHO_DIR, clearSharedHonchoDir } from "./setup";
 import { createMockHoncho, writeHonchoConfig, makeTempDir } from "./helpers";
-import { setHoncho, stubExit, runHook, createFailingHoncho, clearHonchoEnv } from "./hook-harness";
+import { setHoncho, stubExit, runHook, clearHonchoEnv } from "./hook-harness";
 import { cacheStdin, setDetectedHost } from "../src/config";
 
 let handleStop: () => Promise<void>;
@@ -53,6 +53,7 @@ const MEANINGFUL = "Here is a thorough explanation of what I changed and why it 
 describe("stop hook", () => {
   let exitSpy: ReturnType<typeof stubExit>;
   let honcho: ReturnType<typeof createMockHoncho>;
+  let spawnSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     clearSharedHonchoDir();
@@ -64,8 +65,12 @@ describe("stop hook", () => {
     honcho = createMockHoncho();
     setHoncho(honcho);
     cacheStdin("{}");
+    spawnSpy = spyOn(Bun, "spawn").mockImplementation((() => ({ unref() {} })) as never);
   });
-  afterEach(() => exitSpy.mockRestore());
+  afterEach(() => {
+    exitSpy.mockRestore();
+    spawnSpy.mockRestore();
+  });
 
   test("exits without touching Honcho when no config exists", async () => {
     cacheStdin(JSON.stringify({ transcript_path: assistantTranscript(MEANINGFUL) }));
@@ -103,7 +108,7 @@ describe("stop hook", () => {
     expect(honcho.calls["session.addMessages"]).toBeUndefined();
   });
 
-  test("uploads the last assistant message on the happy path", async () => {
+  test("queues the response and spawns the detached upload worker", async () => {
     writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
     cacheStdin(
       JSON.stringify({
@@ -114,30 +119,22 @@ describe("stop hook", () => {
     );
     expect(await runHook(handleStop)).toBe(0);
 
-    expect(honcho.calls["peer"]?.[0]).toEqual(["claude"]);
-    const addCall = honcho.calls["session.addMessages"];
-    expect(addCall).toHaveLength(1);
-    const [, messages] = addCall[0];
-    expect(messages[0].content).toBe(MEANINGFUL);
-    expect(messages[0].opts.metadata.type).toBe("assistant_response");
-  });
+    // Never uploads in-process — the turn must not block on the network.
+    expect(honcho.calls["session.addMessages"]).toBeUndefined();
 
-  test("queues to the outbox when the upload fails", async () => {
-    writeHonchoConfig(SHARED_HONCHO_DIR, baseConfig());
-    setHoncho(createFailingHoncho());
-    cacheStdin(
-      JSON.stringify({
-        session_id: "sess-2",
-        cwd: "/tmp/proj",
-        transcript_path: assistantTranscript(MEANINGFUL),
-      }),
-    );
-    expect(await runHook(handleStop)).toBe(0);
-
+    // Response durably queued (for the worker, and the next-start drain fallback).
     const queued = readOutbox();
     expect(queued).toHaveLength(1);
     expect(queued[0].content).toBe(MEANINGFUL);
     expect(queued[0].peerName).toBe("claude");
     expect(queued[0].metadata.type).toBe("assistant_response");
+
+    // Detached worker spawned to flush the outbox out-of-band.
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+    const [argv, opts] = spawnSpy.mock.calls[0] as [string[], any];
+    expect(argv[0]).toBe("bun");
+    expect(String(argv[2])).toContain("outbox-worker");
+    expect(argv[3]).toBe("/tmp/proj");
+    expect(opts.detached).toBe(true);
   });
 });

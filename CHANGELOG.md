@@ -6,6 +6,10 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+### Changed
+
+- The `Stop` hook no longer uploads the assistant response synchronously on the turn-end critical path. It now durably queues the response to the local outbox and hands the upload to a detached, upload-only worker (`hooks/outbox-worker.ts`) that outlives the hook, so a slow or unreachable Honcho can no longer stall the end of every turn (previously up to the SDK's ~8s timeout). The worker builds its client from the same directory-resolved config the hook used, so the queued record lands in the correct workspace; anything it can't send stays queued and drains on the next `SessionStart` (the existing safety net). Adapts the non-blocking approach of upstream plastic-labs/claude-honcho#50 to this fork's outbox architecture (the fork has no `SessionEnd` hook — it was removed — so the upstream exit-hang symptom does not apply here).
+
 ## [0.1.0] - 2026-07-15
 
 Directory-scoped workspaces: route each project to its own Honcho memory instead of pooling everything in one global workspace.
