@@ -117,15 +117,34 @@ function formatSessionLink(sessionUrl: string): string {
 }
 
 /**
+ * Line-leading labels that mark output the user pasted rather than their own
+ * speech. Anchored at line start (`^`, up to 3 leading spaces) so an inline
+ * mention in genuine prose ("...I hit an error: it crashed") never matches —
+ * only a line that BEGINS with the label, the way pasted output does. Kept
+ * high-precision on purpose: review-bot names and unambiguous crash/trace
+ * markers, not common words like a bare "error"/"warning" a user might open a
+ * sentence with. The match runs through the end of the block (to the next blank
+ * line or end-of-input) so a multi-line review comment or stack trace goes with
+ * its opening line. Extend the alternation as new tools show up in the workflow.
+ */
+const PASTED_ATTRIBUTION_RE =
+  /^[ \t]{0,3}(?:macroscope|copilot|coderabbit(?:ai)?|sourcery|greptile|traceback|stack ?trace|assertion ?error|exception in thread|unhandled exception|segmentation fault|panic|fatal error)\b.*(?:\r?\n(?![ \t]*(?:\r?\n|$)).*)*/gim;
+
+/**
  * Redact pasted non-prose from a user prompt before it's uploaded as user
  * speech. Everything on a `role: "user"` message is read by the server-side
  * fact extractor as the user's own words, so pasted diffs/code/log-dumps become
  * durable misattributions ("<user> changed buildOperatorPlan" from a diff the
  * user asked to review). Redacts fenced code blocks (``` or ~~~, including
  * unterminated fences from truncated pastes), runs of 3+ consecutive diff
- * lines, and long path-bearing output lines; short path mentions and a lone
- * "+"/"-" line in prose are preserved. Returns the possibly-redacted text
- * and whether anything was removed. Ported from upstream plastic-labs/claude-honcho#34.
+ * lines, long path-bearing output lines, markdown blockquote runs, and blocks
+ * that open with a known machine-speaker label (review bots, stack traces,
+ * crash markers) — the prose form of the same misattribution: a pasted
+ * "macroscope: In file … around line 681" review comment was being minted as
+ * "<user> identified an issue in config.ts around line 681". Short path
+ * mentions, a lone "+"/"-" line in prose, and inline mentions like "I hit an
+ * error: …" are preserved. Returns the possibly-redacted text and whether
+ * anything was removed. Extends upstream plastic-labs/claude-honcho#34.
  */
 export function stripPastes(text: string): { text: string; redacted: boolean } {
   let out = text;
@@ -142,7 +161,16 @@ export function stripPastes(text: string): { text: string; redacted: boolean } {
   // 2. Runs of 3+ consecutive unified-diff lines. A single prefixed line in
   //    prose ("Note: + means added") stays; only a real diff block is redacted.
   out = out.replace(/(?:^[+-].*(?:\r?\n|$)){3,}/gm, "[diff removed]\n");
-  // 3. Lines >200 chars that carry a filesystem path — stack traces, log dumps,
+  // 3. Markdown blockquote runs. A `>`-prefixed line is by convention quoted
+  //    material — someone/something else's words the user pasted, not their own.
+  out = out.replace(/(?:^[ \t]{0,3}>.*(?:\r?\n|$))+/gm, "[quoted text removed]\n");
+  // 4. Blocks that open with a known machine-speaker label at line start:
+  //    review-bot comments (macroscope, copilot, …) and stack-trace/crash
+  //    markers. Anchored to line start so inline prose ("...I hit an error: it
+  //    crashed") is untouched — only a line that BEGINS with the label, the way
+  //    pasted output does, is redacted, through to the next blank line or EOF.
+  out = out.replace(PASTED_ATTRIBUTION_RE, "[tool output removed]");
+  // 5. Lines >200 chars that carry a filesystem path — stack traces, log dumps,
   //    JSON blobs. Real prose lines are rarely that long; tool output often is.
   out = out
     .split("\n")
