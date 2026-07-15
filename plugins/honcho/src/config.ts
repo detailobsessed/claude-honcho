@@ -86,6 +86,10 @@ export interface HostConfig {
   enabled?: boolean;
   logging?: boolean;
   saveMessages?: boolean;
+  /** Capture commits made outside a session as observations (default: false — off, they misattribute to the user). */
+  captureGitObservations?: boolean;
+  /** Capture tool actions as observations (default: true). */
+  captureToolObservations?: boolean;
   sessionStrategy?: SessionStrategy;
   sessionPeerPrefix?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
@@ -116,6 +120,8 @@ const HOST_CONFIG_KEYS = [
   "enabled",
   "logging",
   "saveMessages",
+  "captureGitObservations",
+  "captureToolObservations",
   "sessionStrategy",
   "sessionPeerPrefix",
   "reasoningLevel",
@@ -332,6 +338,10 @@ interface HonchoFileConfig {
    */
   keepPooled?: string[];
   saveMessages?: boolean;
+  /** Capture commits made outside a session as observations (default: false — off, they misattribute to the user). */
+  captureGitObservations?: boolean;
+  /** Capture tool actions as observations (default: true). */
+  captureToolObservations?: boolean;
   messageUpload?: MessageUploadConfig;
   contextRefresh?: ContextRefreshConfig;
   endpoint?: HonchoEndpointConfig;
@@ -378,6 +388,10 @@ export interface HonchoCLAUDEConfig {
   sessions?: Record<string, string>;
   /** Save messages to Honcho (default: true) */
   saveMessages?: boolean;
+  /** Capture commits made outside a session as observations (default: false — off, they misattribute to the user). */
+  captureGitObservations?: boolean;
+  /** Capture tool actions as observations (default: true). */
+  captureToolObservations?: boolean;
   /** Default reasoning level for Honcho dialectic calls (default: "medium") */
   reasoningLevel?: ReasoningLevel;
   /**
@@ -499,6 +513,8 @@ function resolveConfig(raw: HonchoFileConfig, host: HonchoHost): HonchoCLAUDECon
     sessionPeerPrefix: hostBlock?.sessionPeerPrefix ?? raw.sessionPeerPrefix,
     sessions: raw.sessions,
     saveMessages: hostBlock?.saveMessages ?? raw.saveMessages,
+    captureGitObservations: hostBlock?.captureGitObservations ?? raw.captureGitObservations,
+    captureToolObservations: hostBlock?.captureToolObservations ?? raw.captureToolObservations,
     reasoningLevel: hostBlock?.reasoningLevel ?? raw.reasoningLevel,
     observationMode: hostBlock?.observationMode ?? raw.observationMode,
     messageUpload: hostBlock?.messageUpload ?? raw.messageUpload,
@@ -539,6 +555,8 @@ export function loadConfigFromEnv(host?: HonchoHost): HonchoCLAUDEConfig | null 
     workspace,
     aiPeer,
     saveMessages: process.env.HONCHO_SAVE_MESSAGES !== "false",
+    captureGitObservations: process.env.HONCHO_CAPTURE_GIT_OBSERVATIONS === "true",
+    captureToolObservations: process.env.HONCHO_CAPTURE_TOOL_OBSERVATIONS !== "false",
     enabled: process.env.HONCHO_ENABLED !== "false",
     logging: process.env.HONCHO_LOGGING !== "false",
   };
@@ -660,6 +678,8 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
     setHostIfExplicit("enabled", enabledForSave, existing.enabled);
     setHostIfExplicit("logging", loggingForSave, existing.logging);
     setHostIfExplicit("saveMessages", config.saveMessages, existing.saveMessages);
+    setHostIfExplicit("captureGitObservations", config.captureGitObservations, existing.captureGitObservations);
+    setHostIfExplicit("captureToolObservations", config.captureToolObservations, existing.captureToolObservations);
     setHostIfExplicit("sessionStrategy", config.sessionStrategy, existing.sessionStrategy);
     setHostIfExplicit("sessionPeerPrefix", config.sessionPeerPrefix, existing.sessionPeerPrefix);
     setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);

@@ -233,8 +233,8 @@ export async function handlePostToolUse(): Promise<void> {
 }
 
 async function logToHonchoAsync(config: any, cwd: string, summary: string): Promise<void> {
-  // Skip if message saving is disabled
-  if (config.saveMessages === false) {
+  // Skip if message saving is disabled, or tool-action observations are off
+  if (config.saveMessages === false || config.captureToolObservations === false) {
     return;
   }
 

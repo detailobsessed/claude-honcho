@@ -6,6 +6,14 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+### Changed
+
+- Git-commit observations are now opt-in and off by default. On `SessionStart` the plugin detected commits made outside a session and uploaded them as `[Git External] …` messages **on the user peer** — so Honcho's fact extractor minted durable, ephemeral, misattributed facts ("the user made commit 9c25069"). This is the same misattribution class as pasted content (#34) and tool actions: anything on a `role: "user"` message is read as the user speaking, regardless of a cosmetic `external: true` tag. A new `captureGitObservations` config flag (env `HONCHO_CAPTURE_GIT_OBSERVATIONS`) gates the upload and defaults to **false**. A companion `captureToolObservations` flag (default **true**, env `HONCHO_CAPTURE_TOOL_OBSERVATIONS`) lets tool-action observations be turned off the same way. Both are plumbed like `saveMessages` (host-block override, env, persistence).
+
+### Fixed
+
+- Trivial acknowledgements ("ok", "thanks", "yes", …) are no longer stored as user speech. The user-prompt hook uploaded every prompt and only skipped *context retrieval* for trivial ones — so pure filler landed in the user's representation as conclusions like "the user acknowledges the offer is nice". The upload is now gated on the same `TRIVIAL_ACK` check, mirroring the `Stop` hook's existing meaningfulness gate for assistant messages; context retrieval and message-count tracking are unaffected.
+
 ## [0.2.0] - 2026-07-15
 
 Turn-path reliability and memory quality: move uploads off the turn-end critical path, stop storing pasted content as the user's own speech, and inject the conclusions that actually match the prompt.

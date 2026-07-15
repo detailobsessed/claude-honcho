@@ -208,6 +208,89 @@ describe("loadConfig", () => {
   });
 });
 
+describe("captureGitObservations / captureToolObservations defaults (capture hygiene)", () => {
+  afterEach(() => {
+    delete process.env.HONCHO_CAPTURE_GIT_OBSERVATIONS;
+    delete process.env.HONCHO_CAPTURE_TOOL_OBSERVATIONS;
+  });
+
+  it("pure env-var config resolves git=false (opt-in) and tool=true (opt-out) by default", async () => {
+    process.env.HONCHO_API_KEY = "hch-test-key";
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+    const config = mod.loadConfigFromEnv();
+    expect(config).not.toBeNull();
+    expect(config!.captureGitObservations).toBe(false);
+    expect(config!.captureToolObservations).toBe(true);
+  });
+
+  it("HONCHO_CAPTURE_GIT_OBSERVATIONS=true and HONCHO_CAPTURE_TOOL_OBSERVATIONS=false flip the env defaults", async () => {
+    process.env.HONCHO_API_KEY = "hch-test-key";
+    process.env.HONCHO_CAPTURE_GIT_OBSERVATIONS = "true";
+    process.env.HONCHO_CAPTURE_TOOL_OBSERVATIONS = "false";
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+    const config = mod.loadConfigFromEnv();
+    expect(config).not.toBeNull();
+    expect(config!.captureGitObservations).toBe(true);
+    expect(config!.captureToolObservations).toBe(false);
+  });
+
+  it("file config with neither flag set leaves both undefined (falsy) — same pattern as saveMessages", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      hosts: {
+        claude_code: { workspace: "test-ws" },
+      },
+    });
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+    const config = mod.loadConfig();
+    expect(config).not.toBeNull();
+    expect(config!.captureGitObservations).toBeFalsy();
+    expect(config!.captureToolObservations).toBeUndefined();
+  });
+
+  it("host block overrides root, mirroring saveMessages precedence", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      captureGitObservations: true,
+      captureToolObservations: true,
+      hosts: {
+        claude_code: {
+          workspace: "test-ws",
+          captureGitObservations: false,
+          captureToolObservations: false,
+        },
+      },
+    });
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+    const config = mod.loadConfig();
+    expect(config).not.toBeNull();
+    expect(config!.captureGitObservations).toBe(false);
+    expect(config!.captureToolObservations).toBe(false);
+  });
+
+  it("falls back to root value when no host-block override is present", async () => {
+    writeHonchoConfig(honchoDir, {
+      apiKey: "hch-key",
+      peerName: "user",
+      captureGitObservations: true,
+      hosts: {
+        claude_code: { workspace: "test-ws" },
+      },
+    });
+    const mod = await import("../src/config.js");
+    mod.setDetectedHost("claude_code");
+    const config = mod.loadConfig();
+    expect(config).not.toBeNull();
+    expect(config!.captureGitObservations).toBe(true);
+  });
+});
+
 describe("saveConfig unknown-field preservation (upstream #29)", () => {
   it("keeps user-added host fields the plugin doesn't parse across a write", async () => {
     writeHonchoConfig(honchoDir, {
