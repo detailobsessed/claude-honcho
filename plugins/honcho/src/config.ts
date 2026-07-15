@@ -674,12 +674,27 @@ export function saveConfig(config: HonchoCLAUDEConfig): void {
     const loggingForSave = process.env.HONCHO_LOGGING === "false" && config.logging === false
       ? existingHost.logging
       : config.logging;
+    // Same env-only guard, adapted to each flag's override polarity:
+    // captureGitObservations defaults OFF so HONCHO_CAPTURE_GIT_OBSERVATIONS=true
+    // is its only override; captureToolObservations defaults ON so
+    // HONCHO_CAPTURE_TOOL_OBSERVATIONS=false is its override. In the no-config-file
+    // path loadConfigFromEnv() bakes these env values into config — persisting them
+    // would outlive the env var and defeat the default (e.g. git observations stuck
+    // on after the var is removed).
+    const captureGitForSave =
+      process.env.HONCHO_CAPTURE_GIT_OBSERVATIONS === "true" && config.captureGitObservations === true
+        ? existingHost.captureGitObservations
+        : config.captureGitObservations;
+    const captureToolForSave =
+      process.env.HONCHO_CAPTURE_TOOL_OBSERVATIONS === "false" && config.captureToolObservations === false
+        ? existingHost.captureToolObservations
+        : config.captureToolObservations;
 
     setHostIfExplicit("enabled", enabledForSave, existing.enabled);
     setHostIfExplicit("logging", loggingForSave, existing.logging);
     setHostIfExplicit("saveMessages", config.saveMessages, existing.saveMessages);
-    setHostIfExplicit("captureGitObservations", config.captureGitObservations, existing.captureGitObservations);
-    setHostIfExplicit("captureToolObservations", config.captureToolObservations, existing.captureToolObservations);
+    setHostIfExplicit("captureGitObservations", captureGitForSave, existing.captureGitObservations);
+    setHostIfExplicit("captureToolObservations", captureToolForSave, existing.captureToolObservations);
     setHostIfExplicit("sessionStrategy", config.sessionStrategy, existing.sessionStrategy);
     setHostIfExplicit("sessionPeerPrefix", config.sessionPeerPrefix, existing.sessionPeerPrefix);
     setHostIfExplicit("reasoningLevel", config.reasoningLevel, existing.reasoningLevel);
