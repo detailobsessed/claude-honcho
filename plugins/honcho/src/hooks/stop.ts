@@ -160,6 +160,7 @@ export async function handleStop(): Promise<void> {
       },
       createdAt: queuedAt,
       queuedAt,
+      workspace: config.workspace,
     },
   ]);
   visStopMessage("out", `queued response (${lastMessage.length} chars)`);

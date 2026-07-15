@@ -50,6 +50,15 @@ export interface OutboxRecord {
   createdAt: string;
   /** Enqueue time, used for the age cap. */
   queuedAt: string;
+  /**
+   * Workspace this record must be uploaded to (config.workspace after any
+   * directory override). A drain only sends records matching its own client's
+   * workspace and requeues the rest, so a worker resolved to one project can't
+   * leak another project's records into the wrong workspace. Optional for
+   * backward compatibility: legacy records without it drain under whatever
+   * workspace the drainer is scoped to (best effort).
+   */
+  workspace?: string;
 }
 
 function ensureDir(): void {
@@ -180,11 +189,12 @@ export async function drainOutbox(
   honcho: Honcho,
   instanceId: string,
   log: (msg: string) => void,
-  opts: { timeBudgetMs?: number; maxAgeMs?: number; maxRecords?: number } = {},
+  opts: { timeBudgetMs?: number; maxAgeMs?: number; maxRecords?: number; workspace?: string } = {},
 ): Promise<void> {
   const timeBudgetMs = opts.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS;
   const maxAgeMs = opts.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
   const maxRecords = opts.maxRecords ?? DEFAULT_MAX_RECORDS;
+  const workspace = opts.workspace;
 
   const claimed = claimFiles(instanceId);
   if (claimed.length === 0) {
@@ -197,16 +207,31 @@ export async function drainOutbox(
     return;
   }
 
-  // Age cap, then count cap (keep the most recent).
+  // Age cap applies to every claimed record so ancient entries — including ones
+  // bound for another workspace — eventually drop instead of cycling forever.
   const now = Date.now();
   const fresh = records.filter((r) => {
     const t = Date.parse(r.queuedAt);
     return Number.isNaN(t) || now - t <= maxAgeMs;
   });
+
+  // Only send records belonging to this drainer's workspace; hold the rest for a
+  // drain scoped to their own workspace. An unset `workspace` means no scoping
+  // (legacy callers/tests) — drain everything, matching the prior behavior.
+  // Records without a workspace (pre-upgrade) drain here too, best effort.
+  const mine =
+    workspace == null
+      ? fresh
+      : fresh.filter((r) => r.workspace == null || r.workspace === workspace);
+  const foreign =
+    workspace == null
+      ? []
+      : fresh.filter((r) => r.workspace != null && r.workspace !== workspace);
+
   // Order by queue time so the count cap below drops the OLDEST records, not
   // whatever happens to sit at the front of the claim/concat order (undated
   // records sort last so a bad timestamp isn't preferentially kept).
-  fresh.sort((a, b) => {
+  mine.sort((a, b) => {
     const ta = Date.parse(a.queuedAt);
     const tb = Date.parse(b.queuedAt);
     if (Number.isNaN(ta)) return 1;
@@ -214,10 +239,10 @@ export async function drainOutbox(
     return ta - tb;
   });
   let dropped = records.length - fresh.length;
-  let kept = fresh;
-  if (fresh.length > maxRecords) {
-    kept = fresh.slice(fresh.length - maxRecords);
-    dropped += fresh.length - maxRecords;
+  let kept = mine;
+  if (mine.length > maxRecords) {
+    kept = mine.slice(mine.length - maxRecords);
+    dropped += mine.length - maxRecords;
   }
 
   // One addMessages round trip per session.
@@ -308,15 +333,19 @@ export async function drainOutbox(
     unsent.push(...groups[i][1]);
   }
 
-  if (unsent.length > 0) {
-    enqueueOutbox(unsent);
+  // Requeue records this drain didn't send: those bound for another workspace,
+  // plus anything the budget or an unreachable host left unsent.
+  const requeue = [...foreign, ...unsent];
+  if (requeue.length > 0) {
+    enqueueOutbox(requeue);
   }
   claimed.forEach(safeUnlink);
 
-  if (sent > 0 || dropped > 0 || unsent.length > 0) {
+  if (sent > 0 || dropped > 0 || requeue.length > 0) {
     log(
       `outbox: flushed ${sent}, dropped ${dropped} (cap/age), ` +
-        `requeued ${unsent.length}`,
+        `requeued ${requeue.length}` +
+        (foreign.length ? ` (${foreign.length} other-workspace)` : ""),
     );
   }
 }

@@ -128,6 +128,7 @@ describe("stop hook", () => {
     expect(queued[0].content).toBe(MEANINGFUL);
     expect(queued[0].peerName).toBe("claude");
     expect(queued[0].metadata.type).toBe("assistant_response");
+    expect(queued[0].workspace).toBe("test-ws");
 
     // Detached worker spawned to flush the outbox out-of-band.
     expect(spawnSpy).toHaveBeenCalledTimes(1);

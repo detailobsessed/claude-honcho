@@ -116,6 +116,38 @@ describe("drainOutbox", () => {
     expect(logs.some((l) => l.includes("flushed 2"))).toBe(true);
   });
 
+  it("only drains records for the drainer's workspace and requeues the rest", async () => {
+    const mod = await import("../src/outbox.js");
+    mod.enqueueOutbox([
+      makeRecord({ sessionName: "sess-a", content: "mine", workspace: "ws-a" }),
+      makeRecord({ sessionName: "sess-b", content: "theirs", workspace: "ws-b" }),
+    ]);
+    const honcho = createMockHoncho();
+    const logs: string[] = [];
+    await mod.drainOutbox(honcho, "instance-1", (msg) => logs.push(msg), { workspace: "ws-a" });
+
+    // Only the matching-workspace record is uploaded.
+    expect(honcho.calls["session.addMessages"].length).toBe(1);
+    expect(honcho.calls["session.addMessages"][0][1].length).toBe(1);
+    expect(honcho.calls.session[0][0]).toBe("sess-a");
+
+    // The other workspace's record is held for a drain scoped to it.
+    const remaining = readOutbox();
+    expect(remaining.length).toBe(1);
+    expect(remaining[0].content).toBe("theirs");
+    expect(remaining[0].workspace).toBe("ws-b");
+    expect(logs.some((l) => l.includes("other-workspace"))).toBe(true);
+  });
+
+  it("drains legacy records with no workspace under any scope", async () => {
+    const mod = await import("../src/outbox.js");
+    mod.enqueueOutbox([makeRecord({ sessionName: "sess-a", content: "legacy" })]);
+    const honcho = createMockHoncho();
+    await mod.drainOutbox(honcho, "instance-1", () => {}, { workspace: "ws-a" });
+    expect(honcho.calls["session.addMessages"]).toBeDefined();
+    expect(readOutbox().length).toBe(0);
+  });
+
   it("groups messages by session (one addMessages per session)", async () => {
     const mod = await import("../src/outbox.js");
     mod.enqueueOutbox([
