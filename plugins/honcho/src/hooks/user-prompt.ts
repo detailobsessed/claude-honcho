@@ -159,6 +159,17 @@ const PASTED_ATTRIBUTION_RE = new RegExp(
  * error: …" are preserved. Returns the possibly-redacted text and whether
  * anything was removed. Extends upstream plastic-labs/claude-honcho#34.
  */
+// A pasted expository block (an article/reference passage) carries none of the
+// markers the other passes key on, and can even contain conversational words
+// ("you", "we") and question marks — so voice can't separate it from speech.
+// Bulk is the only reliable signal: a paragraph both long and multi-sentence
+// reads as pasted reference material, not a typed request. Tuned to clear
+// normal requests (a detailed ask is rarely this long AND this many sentences)
+// while catching a pasted passage. A false positive costs little — only the
+// stored copy is trimmed, so context retrieval still sees the full prompt.
+const LONG_PASTE_MIN_CHARS = 400;
+const LONG_PASTE_MIN_SENTENCES = 3;
+
 export function stripPastes(text: string): { text: string; redacted: boolean } {
   let out = text;
   // 1. Markdown fenced code blocks. Handle both ``` and ~~~ fences, and close
@@ -189,6 +200,22 @@ export function stripPastes(text: string): { text: string; redacted: boolean } {
     .split("\n")
     .map((line) => (line.length > 200 && /[\w.-]*\/[\w.-]+/.test(line) ? "[path/output removed]" : line))
     .join("\n");
+  // 6. Long, multi-sentence expository paragraphs with none of the markers
+  //    above — a pasted article/reference passage stored verbatim as speech,
+  //    which the fact extractor mints into durable misattributions ("<user> is
+  //    aware that Lorem Ipsum comes from Cicero"). Split on blank lines (kept as
+  //    separators) and redact only a paragraph that is BOTH bulky and
+  //    multi-sentence; the user's own short framing line ("here's the doc:") and
+  //    normal typed requests fall under the threshold and survive.
+  out = out
+    .split(/(\n[ \t]*\n)/)
+    .map((part) => {
+      const sentences = (part.match(/[.!?](?=\s|$)/g) || []).length;
+      return part.length >= LONG_PASTE_MIN_CHARS && sentences >= LONG_PASTE_MIN_SENTENCES
+        ? "[long paste removed]"
+        : part;
+    })
+    .join("");
   return { text: out, redacted: out !== text };
 }
 
