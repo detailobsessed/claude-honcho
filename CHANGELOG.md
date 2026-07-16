@@ -6,6 +6,12 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-16
+
+### Fixed
+
+- Long pasted prose is no longer stored verbatim as user speech. `stripPastes` already redacted pasted code, diffs, blockquotes, bot/crash output, and long path lines, but a pasted article or reference passage carried none of those markers and was uploaded on the user peer as the user's own words — so Honcho's deriver minted durable misattributions (a Lorem Ipsum paste produced nine "<user> is aware that Lorem Ipsum comes from Cicero"-style facts, observed live in this fork). No voice heuristic separates such a paste from speech — it can contain "you", "we", and question marks — so a sixth pass keys on bulk: split on blank lines and redact only a paragraph that is both long (≥400 chars) and multi-sentence (≥3 sentence-ending marks). The user's own short framing line and normal typed requests fall under the threshold and are preserved, and only the *stored* copy is stripped — context retrieval still uses the full prompt, so a wrongly-caught long message just doesn't mint durable facts. The paragraph split matches CRLF blank lines too, so a Windows prompt isn't redacted wholesale. Moderate-length pastes (~300–400 chars, two sentences) still slip through by design, to keep the pass from dropping genuine user prose.
+
 ## [0.3.1] - 2026-07-16
 
 ### Fixed
