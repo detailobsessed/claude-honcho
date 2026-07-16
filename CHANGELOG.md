@@ -6,6 +6,12 @@ This project forks [plastic-labs/claude-honcho](https://github.com/plastic-labs/
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-16
+
+### Fixed
+
+- Git-change observations are now authored to the AI peer instead of the user peer. When `captureGitObservations` is enabled, `SessionStart` uploaded `[Git External] …` messages on the *user* peer — and because that peer self-observes, Honcho's deriver minted the commit subjects as durable first-person user facts (a commit subject like "Threaded config through the hook call sites" became a "<user> threaded config …" claim). `detectGitChanges` also can't tell the user's own commits from work Claude committed in a prior session, so the misattribution was systematic. The messages now go to the AI peer: unified reads still surface them through the user self-spine, and in directional/hybrid the AI peer is `observeMe: false`, so they are never derived into the user's self-representation. Complements 0.3.0, which made the capture opt-in and off by default.
+
 ## [0.3.0] - 2026-07-15
 
 Capture hygiene: stop the noise classes this fork's own dogfooding surfaced — external git commits, tool actions, and trivial acknowledgements — from being minted as durable user facts.
