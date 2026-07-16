@@ -325,6 +325,26 @@ describe("stripPastes", () => {
     expect(text).toBe(prompt);
   });
 
+  // CRLF regression: on Windows-style `\r\n\r\n` blank lines the paragraph
+  // split must still fire per-paragraph. Otherwise the whole prompt stays one
+  // part and the user's framing + trailing request are redacted wholesale.
+  test("CRLF blank lines split per-paragraph, framing and request survive", () => {
+    const body =
+      "The mitochondria is the powerhouse of the cell and converts nutrients into ATP " +
+      "through oxidative phosphorylation. This process occurs across the inner membrane " +
+      "where the electron transport chain sits. The proton gradient drives ATP synthase to " +
+      "phosphorylate ADP into ATP. Cells with high energy demands contain many mitochondria " +
+      "to sustain their metabolic activity. Damage to these organelles is implicated in " +
+      "numerous metabolic diseases.";
+    const prompt = `Here's what I pasted:\r\n\r\n${body}\r\n\r\nCan you summarize it?`;
+    const { text, redacted } = stripPastes(prompt);
+    expect(redacted).toBe(true);
+    expect(text).toContain("Here's what I pasted:");
+    expect(text).toContain("Can you summarize it?");
+    expect(text).toContain("[long paste removed]");
+    expect(text).not.toContain("oxidative phosphorylation");
+  });
+
   // Interaction: a fenced code block (pass 1) AND a long prose paste (pass 6)
   // in one message — both are stripped, and the two placeholders coexist.
   test("a code fence and a long prose paste are both stripped", () => {

@@ -208,7 +208,11 @@ export function stripPastes(text: string): { text: string; redacted: boolean } {
   //    multi-sentence; the user's own short framing line ("here's the doc:") and
   //    normal typed requests fall under the threshold and survive.
   out = out
-    .split(/(\n[ \t]*\n)/)
+    // Split on blank lines, keeping the separators. `\r?\n` on both sides so a
+    // CRLF blank line (`\r\n\r\n`) splits too — otherwise a Windows prompt stays
+    // one part and a framing + paste + request message is redacted wholesale,
+    // dropping the user's own words.
+    .split(/(\r?\n[ \t]*\r?\n)/)
     .map((part) => {
       const sentences = (part.match(/[.!?](?=\s|$)/g) || []).length;
       return part.length >= LONG_PASTE_MIN_CHARS && sentences >= LONG_PASTE_MIN_SENTENCES
