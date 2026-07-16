@@ -165,13 +165,22 @@ export async function handleSessionStart(): Promise<void> {
       setSessionForPath(cwd, sessionName);
     }
 
-    // Upload git changes as observations (fire-and-forget)
-    // These capture external activity that happened OUTSIDE of Claude sessions
+    // Upload git changes as observations (fire-and-forget). These capture repo
+    // activity between sessions (commits, branch switches). Author them to the
+    // AI peer, NOT the user: a commit subject like "Threaded config.workspace
+    // through the four hook call sites" is episodic project activity, not a
+    // durable fact about the user — and detectGitChanges can't tell the user's
+    // own commits from work Claude committed in a prior session. Writing them to
+    // the user peer (which self-observes) made the deriver mint them as first-
+    // person user facts ("<user> threaded …"). On the AI peer they never pollute
+    // the user's self-representation: unified reads come from the user self-spine,
+    // and in directional/hybrid the AI peer is observeMe:false so they aren't
+    // derived at all.
     if (config.captureGitObservations && gitChanges.length > 0) {
       const gitObservations = gitChanges
         .filter((c) => c.type !== "initial") // Don't log initial state as observation
         .map((change) =>
-          userPeer.message(`[Git External] ${change.description}`, {
+          aiPeer.message(`[Git External] ${change.description}`, {
             metadata: {
               type: "git_change",
               change_type: change.type,
