@@ -183,9 +183,17 @@ describe("session-start hook", () => {
     const allMessages = (honcho.calls["session.addMessages"] ?? []).flatMap(
       ([, messages]: [string, any[]]) => messages,
     );
-    expect(allMessages.some((m) => typeof m.content === "string" && m.content.startsWith("[Git External]"))).toBe(
-      true,
+    const gitObs = allMessages.filter(
+      (m) => typeof m.content === "string" && m.content.startsWith("[Git External]"),
     );
+    expect(gitObs.length).toBeGreaterThan(0);
+    // Authored by the AI peer, never the user — a commit subject is episodic
+    // project activity, not a durable fact about the user. Writing it to the
+    // user peer let the deriver mint "<user> did <code work>" misattributions.
+    for (const m of gitObs) {
+      expect(m.peerName).toBe("claude");
+      expect(m.peerName).not.toBe("tester");
+    }
   });
 
   test("degrades gracefully (exit 0) when Honcho is unreachable during peer setup", async () => {
