@@ -1,3 +1,15 @@
+> ## 🗄️ This fork is archived (2026-07-17)
+>
+> **Not maintained.** This repository is kept online simply because I think the stuff that shipped here has value — see [what this fork added](#why-this-fork-exists) and the full [changelog](./CHANGELOG.md).
+>
+> I'm trying other memory layers that actually maintain their Claude Code plugin:
+>
+> - **[Hindsight](https://hindsight.vectorize.io/)** (Vectorize)
+> - **[Cognee](https://cognee.ai/)**
+>
+> The code here still works as of the last release, and the per-project workspace scoping
+> may be useful to anyone building on top of it.
+
 # claude-honcho — community fork
 
 [![Honcho Banner](./assets/honcho_clawd.png)](https://honcho.dev)
